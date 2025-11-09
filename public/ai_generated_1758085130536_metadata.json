@@ -1,0 +1,11 @@
+{
+  "prompt": "adidas x fifa world cup 2026 cobranding",
+  "fullPrompt": "IMPORTANT: The first image is a UV template with multiple frames/panels. You MUST fill in EACH frame/panel of this UV template with the design. Each white rectangular area in the template represents a different face/side of the 3D model that needs to be filled with the texture design. adidas x fifa world cup 2026 cobranding. This UV template shows the unwrapped surfaces of a 3D model. Fill each white rectangular frame with the texture design, maintaining proper alignment and continuity across panels. Create a cohesive design that fills ALL white frames/panels in the UV template. The design should be continuous and properly mapped for 3D application. Each panel should contain part of the overall design that will wrap correctly when applied to the 3D model. The output must maintain the exact UV template layout with all frames filled.",
+  "hasLogo": false,
+  "hasReference": false,
+  "baseTexture": "uv-template.jpg",
+  "timestamp": 1758085130536,
+  "imageGenerated": true,
+  "geminiResponse": "",
+  "model": "gemini-2.5-flash-image-preview"
+}

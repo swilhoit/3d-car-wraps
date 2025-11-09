@@ -1,0 +1,11 @@
+{
+  "prompt": "pizza party",
+  "fullPrompt": "Generate a high-quality texture image for wrapping around a 3D model/vehicle. pizza party. Use the first image as a UV template to maintain proper mapping and proportions. Create a seamless, tileable, photorealistic texture suitable for vehicle wrapping or product packaging. The output should be a high-resolution image.",
+  "hasLogo": false,
+  "hasReference": false,
+  "baseTexture": "littlecaesars.jpg",
+  "timestamp": 1758083922341,
+  "imageGenerated": true,
+  "geminiResponse": "",
+  "model": "gemini-2.5-flash-image-preview"
+}

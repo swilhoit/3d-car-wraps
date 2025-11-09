@@ -1,0 +1,28 @@
+{
+  "git": {
+    "deploymentEnabled": {
+      "main": false,
+      "staging": true
+    }
+  },
+  "github": {
+    "autoAlias": false,
+    "silent": true
+  },
+  "functions": {
+    "app/api/*/route.js": {
+      "maxDuration": 10
+    }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Environment",
+          "value": "staging"
+        }
+      ]
+    }
+  ]
+}
