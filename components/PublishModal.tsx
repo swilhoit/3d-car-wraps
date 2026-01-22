@@ -2,17 +2,50 @@
 
 import { useState } from 'react';
 import { publishScene } from '@/lib/firebase/publishedScenes';
+import { uploadSnapshot } from '@/lib/firebase/storage';
 
 interface PublishModalProps {
   isOpen: boolean;
   onClose: () => void;
+  captureThumbnail: () => Promise<string | null>;
   sceneData: {
+    // Core model settings
     texture: string | null;
     backgroundColor: string;
     backgroundImage: string | null;
     numberOfUnits: number;
     sceneRotation: { x: number; y: number; z: number };
     scenePosition: { x: number; y: number; z: number };
+
+    // Camera settings
+    cameraAngle?: string;
+    cameraPosition?: { x: number; y: number; z: number };
+    cameraTarget?: { x: number; y: number; z: number };
+
+    // Animation settings
+    isRotating?: boolean;
+    rotationSpeed?: number;
+
+    // Scene elements visibility
+    showPerson?: boolean;
+    showGroundPlane?: boolean;
+
+    // Environment settings
+    environmentPreset?: string;
+    environmentIntensity?: number;
+    backgroundIntensity?: number;
+
+    // Lighting settings
+    ambientLightIntensity?: number;
+    ambientLightColor?: string;
+    directionalLightIntensity?: number;
+    directionalLightPosition?: { x: number; y: number; z: number };
+    directionalLightColor?: string;
+    hemisphereIntensity?: number;
+
+    // Shadow settings
+    shadowsEnabled?: boolean;
+    shadowQuality?: number;
   };
   userId: string;
   userEmail: string;
@@ -22,6 +55,7 @@ interface PublishModalProps {
 export default function PublishModal({
   isOpen,
   onClose,
+  captureThumbnail,
   sceneData,
   userId,
   userEmail,
@@ -38,21 +72,69 @@ export default function PublishModal({
   if (!isOpen) return null;
 
   const handlePublish = async () => {
-    console.log('Publishing scene with data:', sceneData);
-    console.log('Texture being saved:', sceneData.texture);
+    console.log('🚀 PUBLISH DEBUG: Starting publish process...');
+    console.log('🎯 Scene data:', sceneData);
+    console.log('🎨 Texture being saved:', sceneData.texture);
+    console.log('👤 User info:', { userId, userEmail });
+    console.log('📝 Metadata:', { title, description, isPasswordProtected });
 
     setIsPublishing(true);
     try {
+      // Step 1: Capture thumbnail
+      console.log('📸 THUMBNAIL DEBUG: Starting thumbnail capture...');
+      const thumbnailBase64 = await captureThumbnail();
+      console.log('📸 THUMBNAIL DEBUG: Capture result:', thumbnailBase64 ? 'SUCCESS - Length: ' + thumbnailBase64.length : 'FAILED - null returned');
+
+      let thumbnailUrl: string | undefined = undefined;
+
+      if (thumbnailBase64) {
+        try {
+          // Step 2: Convert base64 to blob and upload
+          console.log('🔄 THUMBNAIL DEBUG: Converting base64 to blob...');
+          const response = await fetch(thumbnailBase64);
+          const blob = await response.blob();
+          console.log('🔄 THUMBNAIL DEBUG: Blob created:', { size: blob.size, type: blob.type });
+
+          console.log('☁️ THUMBNAIL DEBUG: Uploading to Firebase Storage...');
+          const fileName = `scene-thumbnail-${Date.now()}.jpg`;
+          thumbnailUrl = await uploadSnapshot(userId, blob, fileName);
+          console.log('✅ THUMBNAIL DEBUG: Upload successful!', { fileName, thumbnailUrl });
+        } catch (thumbnailError) {
+          console.error('❌ THUMBNAIL DEBUG: Upload failed:', thumbnailError);
+          console.warn('⚠️ Proceeding without thumbnail');
+          // Continue without thumbnail - not a critical failure
+        }
+      } else {
+        console.error('❌ THUMBNAIL DEBUG: Thumbnail capture returned null');
+        console.warn('⚠️ Proceeding without thumbnail');
+      }
+
+      // Step 3: Publish scene with optional thumbnail
+      console.log('🚀 FIRESTORE DEBUG: Publishing scene to Firestore...');
+      console.log('🚀 FIRESTORE DEBUG: Parameters:', {
+        userId,
+        userEmail,
+        sceneDataKeys: Object.keys(sceneData),
+        title: title || 'Untitled Scene',
+        description,
+        hasPassword: isPasswordProtected,
+        thumbnailUrl
+      });
+
       const sceneId = await publishScene(
         userId,
         userEmail,
         sceneData,
         title || 'Untitled Scene',
         description,
-        isPasswordProtected ? password : undefined
+        isPasswordProtected ? password : undefined,
+        thumbnailUrl
       );
 
+      console.log('✅ FIRESTORE DEBUG: Scene published successfully!', { sceneId });
+
       const url = `${window.location.origin}/view/${sceneId}`;
+      console.log('🔗 PUBLISH DEBUG: Generated URL:', url);
       setPublishedUrl(url);
 
       if (onPublished) {

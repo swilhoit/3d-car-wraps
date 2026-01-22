@@ -1,0 +1,68 @@
+import React, { useState, useRef, useEffect } from 'react';
+import Image from 'next/image';
+import ModeSelection from './UVPanelEditor/ModeSelection';
+import GenerateAllMode from './UVPanelEditor/GenerateAllMode';
+import StartWithLogoMode from './UVPanelEditor/StartWithLogoMode';
+import UploadMode from './UVPanelEditor/UploadMode';
+
+interface Panel {
+  // ... existing code ...
+}
+
+const UVPanelEditor: React.FC = () => {
+  const [editorMode, setEditorMode] = useState('selection');
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const uvUploadRef = useRef<HTMLInputElement>(null);
+
+  // Selection Mode
+  const renderSelectionMode = () => (
+    <ModeSelection onModeSelect={setEditorMode} />
+  );
+
+  // Generate All Mode
+  const renderGenerateAllMode = () => (
+    <GenerateAllMode
+      onBack={() => setEditorMode('selection')}
+      onGenerationComplete={() => setEditorMode('review-panels')}
+      setGenerationProgress={setGenerationProgress}
+    />
+  );
+
+  // Start With Logo Mode
+  const renderStartWithLogoMode = () => (
+    <StartWithLogoMode
+      onBack={() => setEditorMode('selection')}
+      onGenerationComplete={() => setEditorMode('review-panels')}
+      setGenerationProgress={setGenerationProgress}
+    />
+  );
+
+  // Upload Custom UV Mode
+  const renderUploadMode = () => (
+    <UploadMode
+      onBack={() => setEditorMode('selection')}
+      uvUploadRef={uvUploadRef}
+      generationProgress={generationProgress}
+    />
+  );
+
+  // Review Panels Mode - Shared editor for both generated and custom panels
+  const renderReviewMode = () => {
+    // ... existing code ...
+  } else if (editorMode === 'start-with-logo') {
+    return renderStartWithLogoMode();
+  } else if (editorMode === 'upload-custom') {
+    return renderUploadMode();
+  } else if (editorMode === 'review-panels') {
+    return renderReviewMode();
+    // ... existing code ...
+  }
+
+  return (
+    <div>
+      {renderEditorMode()}
+    </div>
+  );
+};
+
+export default UVPanelEditor;

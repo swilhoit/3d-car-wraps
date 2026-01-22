@@ -27,8 +27,8 @@ html, body {
   padding: 0;
 }
 
-/* Only apply overflow hidden to the main 3D viewer page */
-body:has(.canvas-container) {
+/* Only apply overflow hidden to the main 3D viewer page (ChromeModel scene-viewer-container) */
+body:has(.scene-viewer-container) {
   overflow: hidden;
 }
 
@@ -37,4 +37,23 @@ body {
   color: var(--foreground);
   font-family: var(--font-inter, Inter), 'Inter', ui-sans-serif, system-ui, sans-serif;
   transition: background-color 0.3s ease;
+}
+
+/* Fabric.js Canvas Styling - Fix for canvas visibility issues */
+/* Fabric.js creates a canvas-container wrapper and two canvas layers (lower + upper) */
+.fabric-canvas-wrapper .canvas-container {
+  position: relative !important;
+  background: transparent !important;
+}
+
+.fabric-canvas-wrapper .canvas-container .lower-canvas,
+.fabric-canvas-wrapper .canvas-container .upper-canvas {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+}
+
+/* Ensure the upper-canvas (interaction layer) doesn't block the lower-canvas (render layer) */
+.fabric-canvas-wrapper .canvas-container .upper-canvas {
+  background: transparent !important;
 }

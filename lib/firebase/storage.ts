@@ -89,3 +89,18 @@ export const uploadSnapshot = async (userId: string, snapshotBlob: Blob, snapsho
     originalName: snapshotName
   });
 };
+
+export const uploadEditorState = async (userId: string, editorStateJson: string, textureName: string) => {
+  const timestamp = Date.now();
+  const jsonFileName = `${timestamp}_${textureName}_editorState.json`;
+  const path = `editorStates/${userId}/${jsonFileName}`;
+
+  // Convert JSON string to Blob
+  const blob = new Blob([editorStateJson], { type: 'application/json' });
+
+  return uploadFile(path, blob, {
+    userId,
+    uploadTime: timestamp.toString(),
+    originalName: jsonFileName
+  });
+};

@@ -2,13 +2,17 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
+import { NextApiRequest, NextApiResponse } from 'next';
 
-export default async function handler(req, res) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { prompt, baseTexture, logo, reference, model = 'nano-banana' } = req.body;
+
+  // IMPORTANT: Only allow data URLs as references, never file paths (prevents template cutouts from being used)
+  const safeReference = reference?.startsWith('data:') ? reference : null;
 
   if (!prompt) {
     return res.status(400).json({ error: 'Prompt is required' });
@@ -20,45 +24,45 @@ export default async function handler(req, res) {
 
   try {
     // Route to different generation functions based on model
+    // Use safeReference to ensure template cutouts are never passed as references
     switch (model) {
       case 'nano-banana':
-        return await generateWithNanoBanana(req, res, prompt, baseTexture, logo, reference);
+        return await generateWithNanoBanana(req, res, prompt, baseTexture, logo, safeReference);
       case 'flux-kontext':
-        return await generateWithFluxKontext(req, res, prompt, baseTexture, logo, reference);
+        return await generateWithFluxKontext(req, res, prompt, baseTexture, logo, safeReference);
       case 'openai-image':
-        return await generateWithOpenAI(req, res, prompt, baseTexture, logo, reference);
+        return await generateWithOpenAI(req, res, prompt, baseTexture, logo, safeReference);
       default:
         return res.status(400).json({ error: 'Invalid model selected' });
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Generation error:', error);
     return res.status(500).json({
       error: 'Failed to generate texture',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 }
 
 // Nano Banana (Gemini) Generation Function
-async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, reference) {
+async function generateWithNanoBanana(req: NextApiRequest, res: NextApiResponse, prompt: string, baseTexture: string, logo: string, reference: string) {
   try {
     // Initialize the Gemini API
-    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
+    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || '');
 
-    // Use Gemini 2.5 Flash Image Preview (Nano Banana) for image generation
+    // Use Gemini 3 Pro Image (Nano Banana Pro) for image generation
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash-image-preview",
+      model: "gemini-3-pro-image-preview",
       generationConfig: {
-        temperature: 0.9,
-        topK: 40,
-        topP: 0.95,
-        // Flash Image Preview has 32,768 token limit for both input and output
+        temperature: 1.0, // Higher temperature for more creative/bold generation
+        topK: 50,         // Increased for more variety
+        topP: 0.95,       // Higher for more creative solutions
         maxOutputTokens: 32768,
       }
     });
     
     // Helper function to convert data URL to Gemini format
-    const dataUrlToGenerativePart = (dataUrl, mimeType = 'image/jpeg') => {
+    const dataUrlToGenerativePart = (dataUrl: string, mimeType: string = 'image/jpeg') => {
       if (!dataUrl) return null;
       // Extract base64 data from data URL
       const base64Data = dataUrl.split(',')[1] || dataUrl;
@@ -71,7 +75,7 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
     };
     
     // Helper to read file as base64
-    const fileToGenerativePart = async (filePath, mimeType = 'image/jpeg') => {
+    const fileToGenerativePart = async (filePath: string, mimeType: string = 'image/jpeg') => {
       try {
         const imageData = await fs.readFile(filePath);
         return {
@@ -88,14 +92,7 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
 
     // Build the parts array for multi-modal input
     const parts = [];
-    
-    // ALWAYS use Waymo UV template as base for proper mapping
-    const uvTemplatePath = path.join(process.cwd(), 'public', 'waymo-uv-template.png');
-    const uvTemplatePart = await fileToGenerativePart(uvTemplatePath, 'image/png');
-    if (uvTemplatePart) {
-      parts.push(uvTemplatePart);
-    }
-    
+
     // Add logo if provided
     if (logo) {
       const logoPart = dataUrlToGenerativePart(logo, 'image/png');
@@ -103,7 +100,7 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
         parts.push(logoPart);
       }
     }
-    
+
     // Add reference image if provided
     if (reference) {
       const referencePart = dataUrlToGenerativePart(reference, 'image/jpeg');
@@ -112,34 +109,64 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
       }
     }
     
-    // Build comprehensive prompt for Waymo vehicle wrap image generation
-    let fullPrompt = `IMPORTANT: The first image is a UV template for a Waymo Jaguar I-Pace vehicle wrap with 6 panels stacked vertically. You MUST fill in EACH of the 6 panel areas with the design. The panels represent: (1) Hood, (2) Front bumper, (3) Left side, (4) Right side, (5) Rear/trunk, (6) Roof. ${prompt}. `;
+    // Build comprehensive prompt for regular background image generation
+    let fullPrompt = '';
 
-    fullPrompt += 'This UV template shows the unwrapped surfaces of a Waymo self-driving vehicle. Fill each of the 6 vertical panel sections with the texture design, maintaining proper alignment and continuity across panels for a cohesive vehicle wrap. ';
-    
-    if (logo) {
-      fullPrompt += 'LOGO PLACEMENT: The provided logo must be placed INDIVIDUALLY on EACH and EVERY frame/panel of the UV template. Do not place the logo on just one panel - replicate it across ALL white rectangular areas. Each panel should have its own instance of the logo integrated into the design. The logo should appear on every face/side of the 3D model when wrapped. ';
-    }
-    
     if (reference) {
-      fullPrompt += 'Use the reference image for style, color palette, and aesthetic inspiration throughout all panels. ';
+      fullPrompt += 'CRITICAL STYLE REFERENCE: A reference image is provided. You MUST closely match its visual style, color palette, texture patterns, mood, and overall aesthetic. Study the reference image carefully and replicate its artistic approach. This is your PRIMARY guidance for the visual style. ';
+      fullPrompt += `Then apply this style to create: ${prompt}. `;
+    } else {
+      fullPrompt += `Create a beautiful, cohesive background design: ${prompt}. `;
     }
-    
-    fullPrompt += 'Create a cohesive vehicle wrap design that fills ALL 6 panels in the UV template vertically. ';
+
+    fullPrompt += 'Generate a complete, edge-to-edge seamless background image. This should be a regular background image suitable for use as a texture or design element. ';
 
     if (logo) {
-      fullPrompt += 'Remember: The logo MUST appear on EACH of the 6 panels (Hood, Front bumper, Left side, Right side, Rear, Roof), not just once. Every panel should contain the logo as part of its design. ';
+      fullPrompt += 'Include the provided logo integrated into the design in a visually appealing way. ';
     }
 
-    fullPrompt += 'The design should be continuous and properly mapped for 3D vehicle wrap application. Each of the 6 panels should contain part of the overall design that will wrap correctly when applied to the Waymo vehicle. The output must maintain the exact UV template layout with all 6 panels filled vertically.';
-    
+    fullPrompt += 'The design should be complete, polished, and production-ready - a beautiful standalone background image that fills the entire frame.';
+
     // Add the text prompt
     parts.push({ text: fullPrompt });
 
-    // Generate content with all parts
+    // Debug: Log what we're sending to Gemini
+    console.log('=== GEMINI INPUT DEBUG ===');
+    console.log('Parts array length:', parts.length);
+    parts.forEach((part, index) => {
+      if ('inlineData' in part && part.inlineData) {
+        console.log(`Part ${index}: Image (${part.inlineData.mimeType}) - ${part.inlineData.data.substring(0, 50)}...`);
+      } else if ('text' in part && part.text) {
+        console.log(`Part ${index}: Text prompt - ${part.text.substring(0, 100)}...`);
+      }
+    });
+    console.log('Has reference image:', !!reference);
+    console.log('Has logo:', !!logo);
+    console.log('Has baseTexture:', !!baseTexture);
+    console.log('========================');
+
+    // Generate content with all parts - try multiple times for consistency
     console.log('Calling Gemini 2.5 Flash Image Preview API...');
-    const result = await model.generateContent(parts);
-    const response = result.response;
+    let result;
+    let response;
+    let attempts = 0;
+    const maxAttempts = 2; // Try twice for better consistency
+
+    while (attempts < maxAttempts) {
+      try {
+        console.log(`Generation attempt ${attempts + 1}/${maxAttempts}`);
+        result = await model.generateContent(parts);
+        response = result.response;
+        break; // Success, exit loop
+      } catch (error) {
+        attempts++;
+        if (attempts >= maxAttempts) {
+          throw error; // Re-throw if all attempts failed
+        }
+        console.log(`Attempt ${attempts} failed, retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+      }
+    }
     
     // Create a unique filename
     const timestamp = Date.now();
@@ -152,7 +179,7 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
     let imageGenerated = false;
     let generatedText = '';
     
-    if (response.candidates && response.candidates[0]) {
+    if (response && response.candidates && response.candidates[0]) {
       const candidate = response.candidates[0];
       
       // Check for inline image data in the response
@@ -180,12 +207,12 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
       
       // Try to get text description
       try {
-        generatedText = response.text() || 'No description available';
+        generatedText = response?.text() || 'No description available';
       } catch {
         generatedText = 'Image generation in progress';
       }
       
-      // Use Waymo UV template as fallback base
+      // Use UV template as fallback base
       const sourcePath = path.join(process.cwd(), 'public', 'waymo-uv-template.png');
       try {
         await fs.copyFile(sourcePath, filePath);
@@ -209,7 +236,7 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
         timestamp: timestamp,
         imageGenerated: imageGenerated,
         geminiResponse: generatedText,
-        model: 'gemini-2.5-flash-image-preview'
+        model: 'gemini-3-pro-image-preview'
       }, null, 2));
     } catch (metaError) {
       console.log('Could not save metadata:', metaError);
@@ -312,7 +339,16 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
     });
 
     // Return response with base64 data for serverless environment
-    let responseData = {
+    const responseData: {
+      filename: string;
+      thumbnail: string;
+      success: boolean;
+      message: string;
+      imageGenerated: boolean;
+      description: string | undefined;
+      imageData?: string;
+      thumbnailData?: string;
+    } = {
       filename,
       thumbnail: `/${thumbnailFilename}`,
       success: true,
@@ -338,10 +374,10 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
     console.error('Generation error:', error);
     
     // Check if it's a model access error
-    if (error.message && error.message.includes('not found')) {
+    if (error instanceof Error && error.message && error.message.includes('not found')) {
       // Fallback to standard Flash model
       try {
-        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
+        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || '');
         const model = genAI.getGenerativeModel({ 
           model: "gemini-1.5-flash",
           generationConfig: {
@@ -366,7 +402,7 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
         const thumbnailFilename = `ai_thumb_${timestamp}.jpg`;
         const thumbnailPath = path.join('/tmp', thumbnailFilename);
         
-        // Always use Waymo UV template for consistency
+        // Always use UV template for consistency
         const sourcePath = path.join(process.cwd(), 'public', 'waymo-uv-template.png');
         
         await fs.copyFile(sourcePath, filePath);
@@ -413,7 +449,15 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
         }, null, 2));
         
         // Return with base64 data for serverless environment
-        let fallbackResponseData = { 
+        const fallbackResponseData: {
+          filename: string;
+          thumbnail: string;
+          success: boolean;
+          message: string;
+          description: string;
+          imageData?: string;
+          thumbnailData?: string;
+        } = {
           filename,
           thumbnail: `/${thumbnailFilename}`,
           success: true,
@@ -439,8 +483,8 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
 
     return res.status(500).json({
       error: 'Failed to generate texture',
-      details: error.message,
-      hint: error.message.includes('not found')
+      details: error instanceof Error ? error.message : 'Unknown error',
+      hint: error instanceof Error && error.message.includes('not found')
         ? 'The gemini-2.5-flash-image-preview model requires special access. Contact Google for access.'
         : undefined
     });
@@ -448,7 +492,7 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
 }
 
 // Flux Kontext Generation Function (via Replicate API)
-async function generateWithFluxKontext(req, res, prompt, baseTexture, logo, reference) {
+async function generateWithFluxKontext(req: NextApiRequest, res: NextApiResponse, prompt: string, baseTexture: string, logo: string, reference: string) {
   const replicateToken = process.env.REPLICATE_API_TOKEN;
 
   if (!replicateToken) {
@@ -456,19 +500,21 @@ async function generateWithFluxKontext(req, res, prompt, baseTexture, logo, refe
   }
 
   try {
-    // Prepare the prompt for Flux Kontext
-    let fluxPrompt = prompt;
+    // Prepare the prompt for Flux Kontext - generate regular background image
+    let fluxPrompt = `Create a beautiful, cohesive background design: ${prompt}`;
 
-    // Add UV template guidance for proper 3D texture mapping
-    fluxPrompt += ' This should be a seamless texture pattern suitable for 3D model wrapping with proper UV mapping.';
+    // Generate a complete background image suitable for 3D texture use
+    fluxPrompt += ' Generate a complete, edge-to-edge seamless background image suitable for use as a texture or design element.';
 
     if (logo) {
-      fluxPrompt += ' Include the provided logo elements integrated into the design.';
+      fluxPrompt += ' Include the provided logo elements integrated into the design in a visually appealing way.';
     }
 
     if (reference) {
-      fluxPrompt += ' Use the reference image for style and color inspiration.';
+      fluxPrompt += ' Use the reference image for style, color palette, and aesthetic inspiration.';
     }
+
+    fluxPrompt += ' The design should be complete, polished, and production-ready.';
 
     // Prepare the API request to Replicate
     const replicateResponse = await fetch('https://api.replicate.com/v1/predictions', {
@@ -596,50 +642,105 @@ async function generateWithFluxKontext(req, res, prompt, baseTexture, logo, refe
     console.error('Flux Kontext generation error:', error);
     return res.status(500).json({
       error: 'Failed to generate with Flux Kontext',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 }
 
 // OpenAI Image Generation Function
-async function generateWithOpenAI(req, res, prompt, baseTexture, logo, reference) {
+async function generateWithOpenAI(req: NextApiRequest, res: NextApiResponse, prompt: string, baseTexture: string, logo: string, reference: string) {
   const openaiApiKey = process.env.OPENAI_API_KEY;
 
   if (!openaiApiKey) {
-    return res.status(500).json({ error: 'OpenAI API key is not configured' });
+    console.error('OpenAI API key not found in environment variables');
+    console.error('Available env vars:', Object.keys(process.env).filter(k => k.includes('OPENAI')));
+    return res.status(500).json({
+      error: 'OpenAI API key is not configured',
+      hint: 'Please add OPENAI_API_KEY to your Vercel environment variables or .env.local file'
+    });
   }
 
   try {
-    // Prepare the prompt for DALL-E
-    let dallePrompt = prompt;
+    // If there's a reference image, analyze it first to get detailed style information
+    let referenceStyleDescription = '';
+    if (reference) {
+      try {
+        console.log('Analyzing reference image for OpenAI generation...');
+        const visionResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openaiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: 'Describe this reference image in detail for use in an image generation prompt. Focus on: colors, style, mood, composition, textures, patterns, and visual aesthetic. Be very specific and descriptive. Keep it under 150 words.'
+                  },
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: reference,
+                      detail: 'low'
+                    }
+                  }
+                ]
+              }
+            ],
+            max_tokens: 200
+          })
+        });
 
-    // Add UV template guidance for proper 3D texture mapping
-    dallePrompt += ' Create a seamless, tileable texture pattern suitable for 3D model UV mapping. The design should wrap properly without visible seams when applied to 3D surfaces.';
+        if (visionResponse.ok) {
+          const visionData = await visionResponse.json();
+          referenceStyleDescription = visionData.choices[0]?.message?.content || '';
+          console.log('Reference image analysis:', referenceStyleDescription);
+        }
+      } catch (error) {
+        console.error('Failed to analyze reference image:', error);
+      }
+    }
+
+    // Prepare the prompt for DALL-E - generate regular background image
+    let dallePrompt = `Create a beautiful, cohesive background design: ${prompt}`;
+
+    // Add reference style description if available
+    if (referenceStyleDescription) {
+      dallePrompt += ` STYLE REFERENCE: ${referenceStyleDescription}`;
+    }
+
+    // Generate a complete background image
+    dallePrompt += ' Generate a complete, edge-to-edge seamless background image. This should be a regular, polished background design suitable for use as a texture or design element.';
 
     if (logo) {
-      dallePrompt += ' Incorporate logo elements throughout the pattern in a repeating, integrated manner.';
+      dallePrompt += ' Incorporate the logo elements into the design in a visually appealing, integrated way.';
     }
 
-    if (reference) {
-      dallePrompt += ' Use similar style, colors, and aesthetic as shown in reference materials.';
-    }
+    // Add technical specifications for better image generation
+    dallePrompt += ' High resolution, professional quality, production-ready design.';
 
-    // Add technical specifications for better texture generation
-    dallePrompt += ' High resolution, professional quality, suitable for product visualization.';
-
-    // Try gpt-image-1 first, fallback to dall-e-3
-    let modelToUse = 'gpt-image-1';
-    let requestBody = {
+    // Use gpt-image-1 with proper parameters
+    console.log('Using gpt-image-1 model for generation');
+    const modelToUse = 'gpt-image-1';
+    const requestBody = {
       model: modelToUse,
       prompt: dallePrompt,
       n: 1,
-      size: '1024x1024',
-      quality: 'hd',
+      size: '1024x1024', // Options: 1024x1024, 1024x1536, 1536x1024
+      quality: 'high',   // Options: low, medium, high, auto (gpt-image-1 parameter)
+      style: 'vivid',    // Options: vivid, natural (more creative vs more realistic)
       response_format: 'url'
     };
 
+    console.log('Request body:', JSON.stringify(requestBody, null, 2));
+
     // Make the API request to OpenAI
-    let openaiResponse = await fetch('https://api.openai.com/v1/images/generations', {
+    const openaiResponse = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${openaiApiKey}`,
@@ -647,32 +748,6 @@ async function generateWithOpenAI(req, res, prompt, baseTexture, logo, reference
       },
       body: JSON.stringify(requestBody)
     });
-
-    // If gpt-image-1 fails, try dall-e-3
-    if (!openaiResponse.ok) {
-      const errorData = await openaiResponse.text();
-      console.log('gpt-image-1 failed, trying dall-e-3:', errorData);
-
-      modelToUse = 'dall-e-3';
-      requestBody = {
-        model: 'dall-e-3',
-        prompt: dallePrompt,
-        n: 1,
-        size: '1024x1024',
-        quality: 'hd',
-        style: 'natural',
-        response_format: 'url'
-      };
-
-      openaiResponse = await fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody)
-      });
-    }
 
     if (!openaiResponse.ok) {
       const errorData = await openaiResponse.text();
@@ -741,18 +816,19 @@ async function generateWithOpenAI(req, res, prompt, baseTexture, logo, reference
       filename,
       thumbnail: `/${thumbnailFilename}`,
       success: true,
-      message: 'Texture generated successfully with OpenAI DALL-E!',
+      message: 'Texture generated successfully with OpenAI GPT-Image-1!',
       imageGenerated: true,
       imageData: `data:image/jpeg;base64,${mainImageBuffer.toString('base64')}`,
       thumbnailData: `data:image/jpeg;base64,${thumbImageBuffer.toString('base64')}`,
-      revisedPrompt: openaiResult.data[0].revised_prompt
+      revisedPrompt: openaiResult.data[0].revised_prompt,
+      model: 'gpt-image-1'
     });
 
   } catch (error) {
     console.error('OpenAI generation error:', error);
     return res.status(500).json({
       error: 'Failed to generate with OpenAI',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 }

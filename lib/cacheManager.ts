@@ -3,6 +3,7 @@ class TextureCacheManager {
   private imageCache: Map<string, HTMLImageElement> = new Map();
   private loadingPromises: Map<string, Promise<HTMLImageElement>> = new Map();
   private preloadQueue: Set<string> = new Set();
+  private brokenUrls: Set<string> = new Set();
 
   private constructor() {
     // Initialize with preset textures that should be preloaded
@@ -101,6 +102,22 @@ class TextureCacheManager {
 
   getCacheSize(): number {
     return this.imageCache.size;
+  }
+
+  isUrlBroken(url: string): boolean {
+    return this.brokenUrls.has(url);
+  }
+
+  markUrlBroken(url: string): void {
+    this.brokenUrls.add(url);
+  }
+
+  markUrlAsBroken(url: string): void {
+    this.brokenUrls.add(url);
+  }
+
+  clearBrokenUrls(): void {
+    this.brokenUrls.clear();
   }
 
   async preloadImages(urls: string[]): Promise<void> {

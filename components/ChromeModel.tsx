@@ -1,505 +1,81 @@
 'use client'
 
-import { useRef, useState, useEffect, Suspense } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
-import { Environment, useGLTF, useFBX, Preload, AdaptiveDpr, AdaptiveEvents, PerformanceMonitor, ContactShadows, useTexture } from '@react-three/drei'
-import { Group } from 'three'
-import * as THREE from 'three'
-import { textureCache } from '@/lib/cacheManager'
-import { useTexturePreloader } from '@/hooks/useTexturePreloader'
-import CachedImage from '@/components/CachedImage'
+import React, { Suspense, useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls, Environment, Preload, ContactShadows, useGLTF, useFBX, PerformanceMonitor, AdaptiveDpr, AdaptiveEvents } from '@react-three/drei';
+import * as THREE from 'three';
+import UVPanelEditor from '../components/UVPanelEditor';
+import AuthModal from './AuthModal';
+import PublishModal from './PublishModal';
+import PublishedScenesModal from './PublishedScenesModal';
+import PasswordPrompt from './PasswordPrompt';
+import { CacheCleaner } from './CacheCleaner';
+import CameraController from './scene/CameraController';
+import BackgroundSphere from './scene/BackgroundSphere';
+import GroundPlane from './scene/GroundPlane';
+import WaymoModel from './scene/WaymoModel';
+import PersonModel from './scene/PersonModel';
+import { useProgressiveTexture } from '@/hooks/useProgressiveTexture';
+import { useTexturePreloader } from '@/hooks/useTexturePreloader';
+import CachedImage from '@/components/CachedImage';
+import { Texture } from './TextureManager';
+import { ConfirmModal, AlertModal } from './CustomModal';
 
 const defaultTextures = [
-  { id: 'blank-waymo.png', name: 'Blank White', thumbnail: null }
-]
+  { id: 'blank-waymo.png', name: 'Blank', thumbnail: '/blank-waymo.png' },
+  { id: 'chargers.jpg', name: 'Chargers', thumbnail: '/thumbnails/chargers.png' },
+  { id: 'littlecaesars.png', name: 'Little Caesars', thumbnail: '/thumbnails/little caesars.png' },
+  { id: 'picnic.png', name: 'Picnic', thumbnail: '/thumbnails/picnic.png' },
+  { id: 'robosense.jpg', name: 'RoboSense', thumbnail: '/thumbnails/robosense.png' },
+  { id: 'creator.png', name: 'The Creator', thumbnail: '/thumbnails/the creator.png' },
+  { id: 'venom.png', name: 'Venom', thumbnail: '/thumbnails/venom.png' },
+  { id: 'wolt.png', name: 'Wolt', thumbnail: '/thumbnails/wolt.png' },
+  { id: 'xpel.png', name: 'Xpel', thumbnail: '/thumbnails/xpel.png' },
+  { id: 'pickup.png', name: 'Pickup', thumbnail: '/thumbnails/prime.png' },
+  { id: 'donjulio.png', name: 'Don Julio', thumbnail: '/thumbnails/don julio.png' },
+  { id: 'electricstate.png', name: 'Electric State', thumbnail: '/thumbnails/netflix.png' }
+];
 
-// Image preloader with progressive loading and caching
-function useProgressiveTexture(texturePath: string | null, generatedTextures: Array<{ id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string }>) {
-  const [texture, setTexture] = useState<THREE.Texture | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+useGLTF.preload('/Waymo.glb');
+useFBX.preload('/3D-guy.fbx');
 
-  useEffect(() => {
-    const loadTextureWithCache = async (path: string) => {
-      // Check if texture is already cached
-      const cachedImage = textureCache.getCachedImage(path)
-
-      if (cachedImage) {
-        // Use cached image directly
-        const cachedTexture = new THREE.Texture(cachedImage)
-        cachedTexture.flipY = false
-        cachedTexture.wrapS = THREE.RepeatWrapping
-        cachedTexture.wrapT = THREE.RepeatWrapping
-        cachedTexture.minFilter = THREE.LinearMipmapLinearFilter
-        cachedTexture.magFilter = THREE.LinearFilter
-        cachedTexture.generateMipmaps = true
-        cachedTexture.anisotropy = 4
-        cachedTexture.needsUpdate = true
-        return cachedTexture
-      }
-
-      // Load and cache if not in cache
-      const img = await textureCache.loadImage(path)
-      const newTexture = new THREE.Texture(img)
-      newTexture.flipY = false
-      newTexture.wrapS = THREE.RepeatWrapping
-      newTexture.wrapT = THREE.RepeatWrapping
-      newTexture.minFilter = THREE.LinearMipmapLinearFilter
-      newTexture.magFilter = THREE.LinearFilter
-      newTexture.generateMipmaps = true
-      newTexture.anisotropy = 4
-      newTexture.needsUpdate = true
-      return newTexture
-    }
-
-    if (!texturePath) {
-      // Load blank white texture as fallback
-      setIsLoading(true)
-      loadTextureWithCache('/blank-waymo.png').then(loadedTexture => {
-        setTexture(loadedTexture)
-        setIsLoading(false)
-      })
-      return
-    }
-
-    setIsLoading(true)
-    const loader = new THREE.TextureLoader()
-    
-    // Handle async texture validation
-    const loadTexture = async () => {
-      // For AI-generated textures, try loading directly and let the loader handle errors
-      // This avoids race conditions where the file might not be immediately available
-      
-      // Check if this is an uploaded UV mock or AI-generated texture with base64 data
-      const base64Texture = generatedTextures.find(t => t.id === texturePath && (texturePath.startsWith('uv_mock_') || texturePath.startsWith('ai_generated_')))
-      
-      if (base64Texture && (base64Texture.imageData || (base64Texture.thumbnail && base64Texture.thumbnail.startsWith('data:')))) {
-        // Load from base64 data URL - prioritize full imageData over thumbnail
-        const textureSource = base64Texture.imageData || base64Texture.thumbnail
-        loader.load(
-          textureSource,
-          (loadedTexture) => {
-            loadedTexture.flipY = false
-            loadedTexture.wrapS = THREE.RepeatWrapping
-            loadedTexture.wrapT = THREE.RepeatWrapping
-            loadedTexture.minFilter = THREE.LinearMipmapLinearFilter
-            loadedTexture.magFilter = THREE.LinearFilter
-            loadedTexture.generateMipmaps = true
-            loadedTexture.anisotropy = 4
-            // Enhance texture vibrancy
-            loadedTexture.colorSpace = THREE.SRGBColorSpace
-            loadedTexture.offset.set(0, 0)
-            loadedTexture.repeat.set(1, 1)
-            setTexture(loadedTexture)
-            setIsLoading(false)
-          },
-          undefined,
-          (error) => {
-            console.error('Error loading base64 texture:', texturePath, error)
-            setIsLoading(false)
-            // Set a fallback texture or null to prevent infinite loading
-            setTexture(null)
-          }
-        )
-      } else {
-        // For Firebase Storage URLs, use them directly. For local files, add the leading slash
-        const originalPath = texturePath.startsWith('http') || texturePath.startsWith('https')
-          ? texturePath
-          : `/${texturePath}`
-
-        // Load texture directly
-        loader.load(
-          originalPath,
-          (loadedTexture) => {
-            loadedTexture.flipY = false
-            loadedTexture.wrapS = THREE.RepeatWrapping
-            loadedTexture.wrapT = THREE.RepeatWrapping
-            loadedTexture.minFilter = THREE.LinearMipmapLinearFilter
-            loadedTexture.magFilter = THREE.LinearFilter
-            loadedTexture.generateMipmaps = true
-            loadedTexture.anisotropy = 4
-            // Enhance texture vibrancy
-            loadedTexture.colorSpace = THREE.SRGBColorSpace
-            loadedTexture.offset.set(0, 0)
-            loadedTexture.repeat.set(1, 1)
-            setTexture(loadedTexture)
-            setIsLoading(false)
-          },
-          undefined,
-          (error) => {
-            console.error('Error loading texture:', texturePath, error)
-            setIsLoading(false)
-            
-            // For AI-generated textures that fail to load, try fallback to Waymo UV template
-            if (texturePath && texturePath.startsWith('ai_generated_')) {
-              console.log('Falling back to UV template for missing AI texture:', texturePath)
-              loader.load(
-                '/waymo-uv-template.png',
-                (fallbackTexture) => {
-                  fallbackTexture.flipY = false
-                  fallbackTexture.wrapS = THREE.RepeatWrapping
-                  fallbackTexture.wrapT = THREE.RepeatWrapping
-                  fallbackTexture.minFilter = THREE.LinearMipmapLinearFilter
-                  fallbackTexture.magFilter = THREE.LinearFilter
-                  fallbackTexture.generateMipmaps = true
-                  fallbackTexture.anisotropy = 4
-                  // Enhance texture vibrancy
-                  fallbackTexture.colorSpace = THREE.SRGBColorSpace
-                  fallbackTexture.offset.set(0, 0)
-                  fallbackTexture.repeat.set(1, 1)
-                  setTexture(fallbackTexture)
-                },
-                undefined,
-                () => {
-                  // If even the fallback fails, set to null
-                  setTexture(null)
-                }
-              )
-            } else {
-              // Set a fallback texture or null to prevent infinite loading
-              setTexture(null)
-            }
-          }
-        )
-      }
-    }
-    
-    // Call the async function
-    loadTexture()
-  }, [texturePath, generatedTextures])
-
-  return { texture, isLoading }
-}
-
-// Camera controller component for smooth transitions with manual rotation support
-function CameraController({ position, target }: {
-  position: [number, number, number],
-  target: [number, number, number]
-}) {
-  useFrame((state) => {
-    // Always use preset position, ignore manual rotation for now
-    // This ensures camera presets work correctly
-    state.camera.position.lerp(new THREE.Vector3(...position), 0.1)
-    state.camera.lookAt(...target)
-  })
-
-  return null
-}
-
-// Background sphere component for wrapping images around environment
-function BackgroundSphere({ image }: { image: string }) {
-  const [texture, setTexture] = useState<THREE.Texture | null>(null)
-
-  useEffect(() => {
-    const loader = new THREE.TextureLoader()
-    loader.load(
-      image,
-      (loadedTexture) => {
-        loadedTexture.mapping = THREE.EquirectangularReflectionMapping
-        loadedTexture.colorSpace = THREE.SRGBColorSpace
-        setTexture(loadedTexture)
-      },
-      undefined,
-      (error) => {
-        console.warn('Failed to load background image:', image, error)
-        // Don't set texture if loading fails
-      }
-    )
-  }, [image])
-
-  if (!texture) return null
-
-  return (
-    <mesh scale={[-50, 50, 50]} position={[0, -1.2, 0]} rotation={[0, 0, 0]}>
-      <sphereGeometry args={[1, 64, 64]} />
-      <meshBasicMaterial map={texture} side={THREE.BackSide} />
-    </mesh>
-  )
-}
-
-// Ground plane component with gravel texture
-function GroundPlane() {
-  // Use URL encoding for spaces in the path
-  const diffuseMap = useTexture('/Gravel%20Texture/textures/gravel_concrete_02_diff_1k.jpg')
-  const displacementMap = useTexture('/Gravel%20Texture/textures/gravel_concrete_02_disp_1k.png')
-
-  // Configure texture wrapping and repeat
-  useEffect(() => {
-    // Set up diffuse map
-    diffuseMap.wrapS = diffuseMap.wrapT = THREE.RepeatWrapping
-    diffuseMap.repeat.set(10, 10)
-    diffuseMap.anisotropy = 16
-    diffuseMap.needsUpdate = true
-
-    // Set up displacement map
-    displacementMap.wrapS = displacementMap.wrapT = THREE.RepeatWrapping
-    displacementMap.repeat.set(10, 10)
-    displacementMap.needsUpdate = true
-  }, [diffuseMap, displacementMap])
-
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.2, 0]} receiveShadow castShadow>
-      <planeGeometry args={[50, 50, 128, 128]} />
-      <meshStandardMaterial
-        map={diffuseMap}
-        displacementMap={displacementMap}
-        displacementScale={0.002}
-        roughness={0.85}
-        metalness={0.15}
-        envMapIntensity={0.3}
-        color="#a0a0a0"
-      />
-    </mesh>
-  )
-}
-
-function WaymoModel({ currentTexture, isRotating, generatedTextures, numberOfUnits, scenePosition, sceneRotation, rotationSpeed }: { currentTexture: string | null, isRotating: boolean, generatedTextures: Array<{ id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string }>, numberOfUnits: number, scenePosition: { x: number, y: number, z: number }, sceneRotation: { x: number, y: number, z: number }, rotationSpeed: number }) {
-  const groupRef = useRef<Group>(null!)
-  const individualGroupRefs = useRef<(Group | null)[]>([])
-  const [isDragging, setIsDragging] = useState(false)
-  const { scene } = useGLTF('/Waymo.glb')
-  const { texture, isLoading } = useProgressiveTexture(currentTexture, generatedTextures)
-  const rotationDirections = useRef<number[]>([])
-  
-  // Generate random rotation directions when number of units changes
-  useEffect(() => {
-    rotationDirections.current = Array.from({ length: numberOfUnits }, () => 
-      numberOfUnits > 1 ? (Math.random() > 0.5 ? 1 : -1) : 1
-    )
-  }, [numberOfUnits])
-  
-  // Store original materials to avoid recreating them
-  const originalMaterials = useRef<Map<THREE.Mesh, THREE.Material | THREE.Material[]>>(new Map())
-
-  useEffect(() => {
-    if (scene) {
-      // First pass: store original materials and optimize geometry
-      scene.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          // Store original material if not already stored
-          if (!originalMaterials.current.has(child)) {
-            originalMaterials.current.set(child, child.material)
-          }
-          
-          // Optimize geometry
-          if (child.geometry) {
-            child.geometry.computeBoundingSphere()
-            // Enable frustum culling
-            child.frustumCulled = true
-            // Reduce geometry complexity if needed
-            if (child.geometry.attributes.position.count > 10000) {
-              child.castShadow = true
-              child.receiveShadow = true
-            }
-          }
-          
-          const material = child.material as THREE.Material
-
-          // Only update materials that are named exactly "Full Wrap"
-          if (material && material.name === 'Full Wrap') {
-            // Always apply a material, never leave it undefined
-            // Reuse material if possible, just update the map and properties
-            if (child.material instanceof THREE.MeshStandardMaterial) {
-              child.material.map = texture
-              child.material.metalness = 0.0
-              child.material.roughness = 0.95
-              child.material.color = new THREE.Color(1.0, 1.0, 1.0)
-              // Reduce reflectivity for more matte appearance
-              child.material.envMapIntensity = 0.1
-              child.material.needsUpdate = true
-            } else {
-              child.material = new THREE.MeshStandardMaterial({
-                map: texture,
-                metalness: 0.0,
-                roughness: 0.95,
-                // Natural color for better texture visibility
-                color: new THREE.Color(1.0, 1.0, 1.0),
-                transparent: false,
-                alphaTest: 0.1,
-                // Reduce reflectivity for more matte appearance
-                envMapIntensity: 0.1,
-              })
-            }
-          }
-        }
-      })
-    }
-  }, [scene, texture])
-
-  useFrame((state, delta) => {
-    if (!isDragging && isRotating) {
-      // Rotate individual models with their own directions
-      individualGroupRefs.current.forEach((ref, index) => {
-        if (ref) {
-          const direction = rotationDirections.current[index] || 1
-          ref.rotation.y += delta * rotationSpeed * 30 * direction
-        }
-      })
-    }
-  })
-
-  // Calculate grid layout for multiple units
-  const cols = Math.ceil(Math.sqrt(numberOfUnits))
-  const rows = Math.ceil(numberOfUnits / cols)
-  const spacing = 4.0 // Reduced spacing to make units closer together
-
-  // Calculate offsets to center the grid
-  const offsetX = ((cols - 1) * spacing) / 2
-  const offsetZ = ((rows - 1) * spacing) / 2
-
-  return (
-    <group
-      ref={groupRef}
-      position={[scenePosition.x, scenePosition.y, scenePosition.z]}
-      rotation={[sceneRotation.x, sceneRotation.y, sceneRotation.z]}
-      onPointerDown={() => setIsDragging(true)}
-      onPointerUp={() => setIsDragging(false)}
-      onPointerLeave={() => setIsDragging(false)}
-    >
-      {Array.from({ length: numberOfUnits }).map((_, index) => {
-        const col = index % cols
-        const row = Math.floor(index / cols)
-        const x = col * spacing - offsetX
-        const z = row * spacing - offsetZ
-
-        return (
-          <group
-            key={index}
-            ref={(el) => { individualGroupRefs.current[index] = el }}
-            position={[x, -1.15, z]}
-            scale={[1.5, 1.5, 1.5]}
-          >
-            <primitive object={scene.clone()} />
-          </group>
-        )
-      })}
-      {isLoading && (
-        <mesh position={[0, 3, 0]}>
-          <boxGeometry args={[0.5, 0.1, 0.5]} />
-          <meshBasicMaterial color="blue" />
-        </mesh>
-      )}
-    </group>
-  )
-}
-
-
-// Person model component for size comparison
-function PersonModel() {
-  const fbx = useFBX('/3D-guy.fbx')
-  const mixerRef = useRef<THREE.AnimationMixer | null>(null)
-
-  useEffect(() => {
-    if (fbx) {
-      const box = new THREE.Box3().setFromObject(fbx)
-      const size = box.getSize(new THREE.Vector3())
-      const center = box.getCenter(new THREE.Vector3())
-
-      console.log('Person model size:', size)
-      console.log('Person model center:', center)
-      console.log('FBX animations:', fbx.animations)
-
-      // Set up animation if available
-      if (fbx.animations && fbx.animations.length > 0) {
-        mixerRef.current = new THREE.AnimationMixer(fbx)
-        const action = mixerRef.current.clipAction(fbx.animations[0])
-        action.play()
-        console.log('Playing animation:', fbx.animations[0].name)
-      }
-
-      // Apply uniform grey material to all meshes
-      let meshIndex = 0
-      fbx.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.castShadow = true
-          child.receiveShadow = true
-
-          console.log('Mesh found:', child.name, 'Current material:', child.material)
-
-          // Apply uniform light grey material to everything
-          child.material = new THREE.MeshPhongMaterial({
-            color: new THREE.Color(0xB0B0B0), // Light grey
-            specular: new THREE.Color(0x333333),
-            shininess: 20,
-            side: THREE.DoubleSide,
-            flatShading: false
-          })
-
-          console.log(`Applied grey material to mesh: ${child.name}`)
-          meshIndex++
-        }
-      })
-
-      console.log(`Total meshes processed: ${meshIndex}`)
-
-      // Center the model at its feet
-      const minY = box.min.y
-      fbx.position.y = -minY
-    }
-
-    return () => {
-      // Clean up mixer on unmount
-      if (mixerRef.current) {
-        mixerRef.current.stopAllAction()
-      }
-    }
-  }, [fbx])
-
-  // Update animation
-  useFrame((state, delta) => {
-    if (mixerRef.current) {
-      mixerRef.current.update(delta)
-    }
-  })
-
-  // Scale for the FBX model - increased by 25%
-  const scale = 0.0125
-
-  // Position further to the left of the main model, properly grounded
-  return (
-    <group position={[-3, -1.15, 0]} scale={[scale, scale, scale]}>
-      <primitive object={fbx} />
-    </group>
-  )
-}
-
-// Preload models
-useGLTF.preload('/Waymo.glb')
-useFBX.preload('/3D-guy.fbx')
-
-// Utility function to check if a texture file exists
 async function checkTextureExists(filename: string): Promise<boolean> {
+  if (filename.startsWith('data:')) {
+    return true;
+  }
+
   try {
-    const response = await fetch(`/${filename}`, { method: 'HEAD' })
-    return response.ok
+    const response = await fetch(`/${filename}`, { method: 'HEAD' });
+    return response.ok;
   } catch {
-    return false
+    return false;
   }
 }
 
-import { Texture } from './TextureManager'
-import { ConfirmModal, AlertModal } from './CustomModal'
-import PublishModal from './PublishModal'
-
 interface ChromeModelProps {
   currentTexture?: string | null;
-  onSaveAITexture?: ((base64: string, name: string, prompt?: string) => Promise<string>) | null;
+  onSaveAITexture?: ((base64: string, name: string, prompt?: string, editorState?: Record<string, unknown>, thumbnailBase64?: string) => Promise<string>) | null;
+  onUploadTextureImages?: ((base64: string, name: string, editorState?: Record<string, unknown>, thumbnailBase64?: string) => Promise<{ textureUrl: string; thumbnailUrl: string; cleanedEditorState: Record<string, unknown> | null }>) | null;
   userTextures?: Texture[];
   onTextureSelect?: (textureUrl: string) => void;
   onDeleteUserTexture?: (textureId: string) => Promise<void>;
+  onRenameUserTexture?: (textureId: string, newName: string) => Promise<void>;
+  onUpdateTextureMetadata?: (textureId: string, data: { name?: string; url?: string; thumbnailUrl?: string; metadata?: Record<string, unknown> }) => Promise<void>;
   userId?: string | null;
   userEmail?: string | null;
 }
 
-export default function ChromeModel({ currentTexture: externalTexture, onSaveAITexture, userTextures = [], onTextureSelect, onDeleteUserTexture, userId, userEmail }: ChromeModelProps) {
+export default function ChromeModel({ currentTexture: externalTexture, onSaveAITexture, onUploadTextureImages, userTextures = [], onTextureSelect, onDeleteUserTexture, onRenameUserTexture, onUpdateTextureMetadata, userId, userEmail }: ChromeModelProps) {
   // Initialize texture preloader
   useTexturePreloader()
 
-  // Initialize with blank white texture as default
+  // Initialize with blank Waymo texture as default
   const [internalTexture, setInternalTexture] = useState<string>('blank-waymo.png')
+  const [isTextureLoading, setIsTextureLoading] = useState(false)
   // Use internal texture if external is null or undefined
   const currentTexture = externalTexture !== null && externalTexture !== undefined ? externalTexture : internalTexture
 
-  // Ensure blank texture stays as default
+  // Ensure blank Waymo texture stays as default
   useEffect(() => {
     if (!externalTexture) {
       setInternalTexture('blank-waymo.png')
@@ -522,14 +98,78 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
   const [showPerson, setShowPerson] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [numberOfUnits, setNumberOfUnits] = useState(1)
-  const [galleryMode, setGalleryMode] = useState<'texture' | 'background'>('texture')
-  const [galleryView, setGalleryView] = useState<'card' | 'list'>('card')
+  const [formation, setFormation] = useState<'grid' | 'line' | 'scatter'>('grid')
+  const [scatterSeed, setScatterSeed] = useState(0)
+  // const [galleryMode, setGalleryMode] = useState<'texture' | 'background'>('texture')
+  const [galleryView, setGalleryView] = useState<'card' | 'list'>('list')
+  const [activeLibraryTab, setActiveLibraryTab] = useState<'my-designs' | 'past-clients' | 'saved-snapshots'>('my-designs')
+  const [userHasManuallySetView, setUserHasManuallySetView] = useState(false)
+  const [savedSnapshots, setSavedSnapshots] = useState<Array<{ id: string; url: string; prompt: string; timestamp: number }>>(() => {
+    // Load saved snapshots from localStorage on mount
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('savedSnapshots')
+        if (saved) {
+          return JSON.parse(saved)
+        }
+      } catch (e) {
+        console.error('Failed to parse saved snapshots:', e)
+        localStorage.removeItem('savedSnapshots')
+      }
+    }
+    return []
+  })
+
+  // Auto-switch gallery view based on content (only if user hasn't manually set preference)
+  useEffect(() => {
+    if (!userHasManuallySetView && activeLibraryTab === 'my-designs') {
+      const myDesigns = [...generatedTextures, ...userTextures.map(t => ({
+        id: t.url,
+        name: t.name,
+        thumbnail: t.thumbnailUrl || t.url,
+        isUserTexture: true,
+        textureId: t.id
+      }))];
+
+      const uniqueDesigns = myDesigns.filter((design, index, array) => {
+        // Remove entries that look like the old blank template
+        if (design.name === 'Blank' && design.id.includes('blank-template')) {
+          return false;
+        }
+
+        // Remove generated textures that don't have valid imageData
+        if ('isGenerated' in design && design.isGenerated) {
+          const generatedTexture = design as { id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string };
+          if (!generatedTexture.imageData || !generatedTexture.imageData.startsWith('data:')) {
+            return false;
+          }
+        }
+
+        // Deduplicate by ID
+        return array.findIndex(d => d.id === design.id) === index;
+      });
+
+      // Switch to card view if there are designs, list view if empty
+      const newView = uniqueDesigns.length > 0 ? 'card' : 'list';
+      if (galleryView !== newView) {
+        setGalleryView(newView);
+      }
+    }
+  }, [generatedTextures, userTextures, activeLibraryTab, userHasManuallySetView, galleryView]);
+
   const [backgroundColor, setBackgroundColor] = useState('#1a1a1a')
+  const [flagColor, setFlagColor] = useState('#ff0000')
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null)
   const [skyboxPreset, setSkyboxPreset] = useState<string | null>(null)
+  const [floorMode, setFloorMode] = useState<'asphalt' | 'custom'>('asphalt')
+  const [floorColor, setFloorColor] = useState('#808080')
   const [showBackgroundModal, setShowBackgroundModal] = useState(false)
   const [backgroundPrompt, setBackgroundPrompt] = useState('')
   const [isGeneratingBackground, setIsGeneratingBackground] = useState(false)
+  const [showUVPanelEditor, setShowUVPanelEditor] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [editingTexture, setEditingTexture] = useState<{ id: string, name: string, imageData: string, editorState?: any } | null>(null)
+  const [combinedUVMap, setCombinedUVMap] = useState<string | null>(null)
   const [generatedBackgrounds, setGeneratedBackgrounds] = useState<Array<{ id: string, url: string }>>(() => {
     // Start with empty array to avoid loading non-existent files
     return []
@@ -562,6 +202,8 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
   const [showPublishModal, setShowPublishModal] = useState(false)
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; action?: () => void; message?: string }>({ isOpen: false })
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; message: string; type: 'success' | 'error' | 'info' }>({ isOpen: false, message: '', type: 'info' })
+  const [renameModal, setRenameModal] = useState<{ isOpen: boolean; textureId?: string; currentName?: string }>({ isOpen: false })
+  const [newTextureName, setNewTextureName] = useState('')
   const [snapshotConfig, setSnapshotConfig] = useState({
     quality: 'high' as 'low' | 'medium' | 'high' | 'ultra',
     resolution: 2048,
@@ -569,10 +211,17 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
     shadows: false,
     environmentQuality: 'medium' as 'low' | 'medium' | 'high'
   })
+  const [snapshotBackgroundPrompt, setSnapshotBackgroundPrompt] = useState('')
+  const [isGeneratingSnapshotBackground, setIsGeneratingSnapshotBackground] = useState(false)
+  const [generatedSnapshotBackground, setGeneratedSnapshotBackground] = useState<{ url: string; prompt: string } | null>(null)
+  const [showBackgroundPreviewModal, setShowBackgroundPreviewModal] = useState(false)
+  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null)
+  const [referenceImagePreview, setReferenceImagePreview] = useState<string | null>(null)
+  const [selectedSnapshotForPreview, setSelectedSnapshotForPreview] = useState<{ id: string; url: string; prompt: string; timestamp: number } | null>(null)
 
   // Camera angle presets - adjusted for street level perspective
   const [currentCameraAngle, setCurrentCameraAngle] = useState('threequarter')
-  const [cameraRotation, setCameraRotation] = useState({ azimuth: 0, elevation: 0, distance: 5 })
+  const [cameraRotation, setCameraRotation] = useState<{ azimuth: number, elevation: number, distance?: number }>({ azimuth: 0, elevation: 0, distance: undefined })
 
   // Save uploaded backgrounds to localStorage whenever they change
   useEffect(() => {
@@ -595,7 +244,6 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
       // Clear localStorage if quota exceeded
       if (e instanceof DOMException && e.name === 'QuotaExceededError') {
         localStorage.removeItem('uploadedBackgrounds')
-        console.log('Cleared uploadedBackgrounds from localStorage due to quota')
       }
     }
   }, [uploadedBackgrounds])
@@ -607,25 +255,48 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
       fetch(backgroundImage, { method: 'HEAD' })
         .then(response => {
           if (!response.ok) {
-            console.log('Generated background not found, clearing:', backgroundImage)
             setBackgroundImage(null)
           }
         })
         .catch(() => {
-          console.log('Generated background not accessible, clearing:', backgroundImage)
           setBackgroundImage(null)
         })
     }
   }, [backgroundImage])
 
   const cameraPresets: Record<string, { position: number[], target: number[], name: string }> = {
-    front: { position: [0, 2, 14], target: [0, 0, 0], name: 'Front' },
-    side: { position: [14, 2, 0], target: [0, 0, 0], name: 'Side' },
-    back: { position: [0, 2, -14], target: [0, 0, 0], name: 'Back' },
-    topFront: { position: [0, 10, 12], target: [0, 0, 0], name: 'Top Front' },
-    lowAngle: { position: [0, 0.5, 12], target: [0, 0, 0], name: 'Low Angle' },
-    threequarter: { position: [10, 4, 10], target: [0, 0, 0], name: '3/4 View' },
-    custom: { position: [12, 12, 12], target: [0, 0, 0], name: 'Top 3/4' }
+    front: { position: [0, 3, 22], target: [0, 0, 0], name: 'Front' },
+    side: { position: [22, 3, 0], target: [0, 0, 0], name: 'Side' },
+    back: { position: [0, 3, -22], target: [0, 0, 0], name: 'Back' },
+    topFront: { position: [0, 12, 18], target: [0, 0, 0], name: 'Top Front' },
+    lowAngle: { position: [0, 1, 18], target: [0, 1, 0], name: 'Low Angle' },
+    threequarter: { position: [16, 6, 16], target: [0, 0, 0], name: '3/4 View' },
+    custom: { position: [18, 15, 18], target: [0, 0, 0], name: 'Top 3/4' }
+  }
+
+  // Calculate camera position from spherical coordinates when in custom mode
+  const getCameraPosition = (): [number, number, number] => {
+    if (currentCameraAngle === 'custom') {
+      const { azimuth, elevation, distance } = cameraRotation;
+      const effectiveDistance = distance ?? 5;
+      const target = [0, -0.5, 0];
+
+      // Convert spherical coordinates to cartesian
+      const x = effectiveDistance * Math.cos(elevation) * Math.sin(azimuth);
+      const y = target[1] + effectiveDistance * Math.sin(elevation);
+      const z = effectiveDistance * Math.cos(elevation) * Math.cos(azimuth);
+
+      console.log('🎥 CUSTOM MODE - Calculated position:', {
+        azimuth: (azimuth * 180 / Math.PI).toFixed(0) + '°',
+        elevation: (elevation * 180 / Math.PI).toFixed(0) + '°',
+        distance: effectiveDistance,
+        position: [x.toFixed(2), y.toFixed(2), z.toFixed(2)]
+      });
+
+      return [x, y, z];
+    }
+
+    return cameraPresets[currentCameraAngle].position as [number, number, number];
   }
 
   // Validate current texture exists, reset to default if missing (but only for older textures)
@@ -648,7 +319,7 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
         const exists = await checkTextureExists(currentTexture)
         if (!exists) {
           console.warn('Current texture is missing, resetting to default:', currentTexture)
-          setInternalTexture('blank-waymo.png')
+          setInternalTexture('waymo-uv-template.png')
         }
       }
     }
@@ -690,8 +361,7 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
           hasChanges = true
           // If this was the current texture, reset to default
           if (currentTexture === texture.id) {
-            console.log('Current texture is missing, resetting to default')
-            setInternalTexture('blank-template.png')
+            setInternalTexture('blank-waymo.png')
           }
         }
       }
@@ -716,31 +386,57 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
     }
   }, [recentlyGeneratedTextures])
 
+  // Helper function to composite canvas with background color
+  const compositeCanvasWithBackground = (sourceCanvas: HTMLCanvasElement, bgColor: string, bgImage: string | null): HTMLCanvasElement => {
+    const outputCanvas = document.createElement('canvas')
+    outputCanvas.width = sourceCanvas.width
+    outputCanvas.height = sourceCanvas.height
+    const ctx = outputCanvas.getContext('2d')
+
+    if (ctx) {
+      // Fill with background color first
+      ctx.fillStyle = bgColor
+      ctx.fillRect(0, 0, outputCanvas.width, outputCanvas.height)
+
+      // If there's a background image, we could draw it here too
+      // (but typically it's already in the CSS and handled separately)
+
+      // Draw the 3D canvas on top
+      ctx.drawImage(sourceCanvas, 0, 0)
+    }
+
+    return outputCanvas
+  }
+
   // Function to download high-quality canvas snapshot
   const downloadHighQualitySnapshot = async () => {
     if (!canvasRef.current) return
-    
+
     const canvas = canvasRef.current as HTMLCanvasElement
-    // const originalWidth = canvas.width
-    // const originalHeight = canvas.height
     const originalDpr = dpr
-    
+
     try {
       // Set high-quality rendering settings
       const targetResolution = snapshotConfig.resolution
-      const qualityMultiplier = snapshotConfig.quality === 'ultra' ? 2 : 
-                               snapshotConfig.quality === 'high' ? 1.5 : 
+      const qualityMultiplier = snapshotConfig.quality === 'ultra' ? 2 :
+                               snapshotConfig.quality === 'high' ? 1.5 :
                                snapshotConfig.quality === 'medium' ? 1.2 : 1
-      
+
       // Temporarily increase DPR and canvas size
       setDpr(Math.max(2, originalDpr * qualityMultiplier))
-      
+
       // Wait for next frame to apply changes
       await new Promise(resolve => requestAnimationFrame(resolve))
       await new Promise(resolve => setTimeout(resolve, 100))
-      
+
+      // Composite the canvas with background color (if no skybox or background image)
+      // This ensures solid color backgrounds are captured in the snapshot
+      const outputCanvas = (!skyboxPreset && !backgroundImage)
+        ? compositeCanvasWithBackground(canvas, backgroundColor, backgroundImage)
+        : canvas
+
       // Capture the high-quality frame
-      canvas.toBlob((blob: Blob | null) => {
+      outputCanvas.toBlob((blob: Blob | null) => {
         if (blob) {
           const url = URL.createObjectURL(blob)
           const link = document.createElement('a')
@@ -749,11 +445,11 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
           link.click()
           URL.revokeObjectURL(url)
         }
-        
+
         // Restore original settings
         setDpr(originalDpr)
       }, 'image/png')
-      
+
     } catch (error) {
       console.error('High-quality snapshot failed:', error)
       // Restore original settings on error
@@ -761,9 +457,318 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
     }
   }
 
+  // Function to capture scene snapshot as base64 for AI processing
+  const captureSceneSnapshot = async (): Promise<string | null> => {
+    if (!canvasRef.current) return null
+
+    const canvas = canvasRef.current as HTMLCanvasElement
+
+    try {
+      // Wait for next frame to ensure scene is rendered
+      await new Promise(resolve => requestAnimationFrame(resolve))
+
+      // Composite with background color if no skybox or background image
+      const outputCanvas = (!skyboxPreset && !backgroundImage)
+        ? compositeCanvasWithBackground(canvas, backgroundColor, backgroundImage)
+        : canvas
+
+      // Capture the canvas as base64
+      return outputCanvas.toDataURL('image/jpeg', 0.9)
+    } catch (error) {
+      console.error('Scene snapshot capture failed:', error)
+      return null
+    }
+  }
+
   // Function to download canvas snapshot (opens modal)
   const downloadSnapshot = () => {
     setShowSnapshotModal(true)
+  }
+
+  // Function to capture thumbnail for publishing (returns Promise<string | null>)
+  const captureThumbnail = async (): Promise<string | null> => {
+    console.log('🔍 Starting thumbnail capture...')
+
+    if (!canvasRef.current) {
+      console.error('❌ Canvas ref not available for thumbnail capture')
+      return null
+    }
+
+    const canvas = canvasRef.current as HTMLCanvasElement
+    console.log('📐 Canvas dimensions:', canvas.width, 'x', canvas.height)
+
+    const originalDpr = dpr
+
+    try {
+      // Set optimal thumbnail settings (512x512 at good quality)
+      const thumbnailSize = 512
+      const qualityMultiplier = 1.5
+
+      console.log('⚙️ Setting DPR for thumbnail capture...')
+      // Temporarily increase DPR for better quality
+      setDpr(Math.max(2, originalDpr * qualityMultiplier))
+
+      // Wait for next frame to apply changes
+      console.log('⏳ Waiting for render...')
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      await new Promise(resolve => setTimeout(resolve, 200)) // Increased wait time
+
+      // Composite with background color if no skybox or background image
+      const outputCanvas = (!skyboxPreset && !backgroundImage)
+        ? compositeCanvasWithBackground(canvas, backgroundColor, backgroundImage)
+        : canvas
+
+      // Capture the thumbnail
+      console.log('📸 Capturing canvas as blob...')
+      return new Promise<string | null>((resolve) => {
+        outputCanvas.toBlob((blob: Blob | null) => {
+          // Restore original settings
+          setDpr(originalDpr)
+          console.log('🔄 DPR restored to:', originalDpr)
+
+          if (blob) {
+            console.log('✅ Blob created, size:', blob.size, 'bytes')
+            // Convert blob to base64 for upload
+            const reader = new FileReader()
+            reader.onloadend = () => {
+              const result = reader.result as string
+              console.log('✅ Base64 conversion complete, length:', result.length)
+              resolve(result)
+            }
+            reader.onerror = (error) => {
+              console.error('❌ FileReader error:', error)
+              resolve(null)
+            }
+            reader.readAsDataURL(blob)
+          } else {
+            console.error('❌ Canvas.toBlob returned null')
+            resolve(null)
+          }
+        }, 'image/jpeg', 0.8) // Use JPEG with 80% quality for smaller file size
+      })
+
+    } catch (error) {
+      console.error('❌ Thumbnail capture failed:', error)
+      // Restore original settings on error
+      setDpr(originalDpr)
+      return null
+    }
+  }
+
+  // Function to handle starting an edit
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleEditTexture = (texture: { id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string, editorState?: any }) => {
+    if (texture.imageData) {
+      setEditingTexture({
+        id: texture.id,
+        name: texture.name,
+        imageData: texture.imageData,
+        editorState: texture.editorState // Pass through any saved editor state
+      })
+      setShowUVPanelEditor(true)
+    }
+  }
+
+  // Function to edit user texture
+  const handleEditUserTexture = async (texture: { id: string, name: string, thumbnail: string, isUserTexture: true, textureId: string }) => {
+    try {
+      // Get the full texture data from userTextures to access metadata with editor state
+      const fullTextureData = userTextures?.find(t => t.id === texture.textureId);
+
+      // Extract editor state from metadata
+      // First try new format (meta_editorStateUrl from Firebase Storage)
+      // Then fall back to old format (editorState directly in metadata)
+      let editorState: Record<string, unknown> | undefined;
+
+      const editorStateUrl = fullTextureData?.meta_editorStateUrl as string | undefined;
+      if (editorStateUrl) {
+        try {
+          console.log('🔍 Fetching editor state from:', editorStateUrl);
+          const response = await fetch(editorStateUrl);
+          const jsonData = await response.json();
+          editorState = jsonData;
+          console.log('✅ Editor state loaded from Storage');
+        } catch (error) {
+          console.error('❌ Failed to fetch editor state from URL:', error);
+        }
+      } else if (fullTextureData?.metadata?.editorState) {
+        // Fallback to old format
+        editorState = fullTextureData.metadata.editorState as Record<string, unknown>;
+        console.log('✅ Using legacy editor state from metadata');
+      }
+
+      // For user textures, we'll use the Firebase Storage URL as the imageData
+      setEditingTexture({
+        id: texture.textureId,
+        name: texture.name,
+        imageData: texture.id, // texture.id is the Firebase Storage URL
+        editorState: editorState // Include editor state if available
+      })
+      setShowUVPanelEditor(true)
+    } catch (error) {
+      console.error('Error preparing texture for editing:', error);
+      // Fallback to basic editing without state restoration
+      setEditingTexture({
+        id: texture.textureId,
+        name: texture.name,
+        imageData: texture.id
+      })
+      setShowUVPanelEditor(true)
+    }
+  }
+
+  // Function to handle UV Panel Editor completion
+  const handleUVPanelComplete = async (data: {
+    uvMapUrl: string;
+    thumbnailUrl?: string;
+    designName: string;
+    clientName: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    editorState: any; // DesignEditorState from UVPanelEditor - using any to avoid circular dependency
+    flagColor?: string;
+  }) => {
+    const { uvMapUrl, thumbnailUrl, designName, clientName, editorState, flagColor: updatedFlagColor } = data;
+
+    // Update flag color if provided
+    if (updatedFlagColor) {
+      setFlagColor(updatedFlagColor);
+    }
+    setCombinedUVMap(uvMapUrl)
+    setInternalTexture(uvMapUrl)
+
+    // Auto-apply the new texture to the model
+    if (onTextureSelect) {
+      onTextureSelect(uvMapUrl)
+    }
+
+    setShowUVPanelEditor(false)
+
+    // Use thumbnailUrl if provided, otherwise fall back to uvMapUrl
+    const displayThumbnail = thumbnailUrl || uvMapUrl;
+
+    if (editingTexture) {
+      // Update existing texture
+      console.log('📝 Updating existing texture:', { editingTextureId: editingTexture.id, newName: designName })
+
+      // Check if this is a Firestore texture (user texture) by looking in userTextures
+      const isFirestoreTexture = userTextures.find(t => t.id === editingTexture.id);
+
+      if (isFirestoreTexture && onUploadTextureImages && onUpdateTextureMetadata && userId) {
+        // Upload UV map and thumbnail to Firebase Storage WITHOUT creating a new document
+        console.log('🔥 Uploading UV map to Storage and updating existing Firestore document...')
+
+        try {
+          // Upload images directly to Storage (doesn't create a new Firestore document)
+          const { textureUrl: newTextureUrl, thumbnailUrl: newThumbnailUrl, cleanedEditorState } = await onUploadTextureImages(
+            uvMapUrl,
+            `${designName || isFirestoreTexture.name}_${Date.now()}`,
+            editorState,
+            displayThumbnail
+          );
+
+          console.log('✅ Images uploaded to Storage:', { textureUrl: newTextureUrl, thumbnailUrl: newThumbnailUrl });
+
+          // Upload editor state to Firebase Storage (same as new save flow)
+          // This is critical - the updateTexture function filters out complex objects,
+          // so we must upload as a JSON file and store the URL instead
+          let editorStateUrl: string | null = null;
+          const stateToUpload = cleanedEditorState || editorState;
+          if (stateToUpload && userId) {
+            try {
+              const editorStateString = JSON.stringify(stateToUpload);
+              console.log('🔍 Uploading editorState to Storage for update, size:', editorStateString.length);
+              const { uploadEditorState } = await import('../lib/firebase/storage');
+              editorStateUrl = await uploadEditorState(userId, editorStateString, designName || isFirestoreTexture.name);
+              console.log('✅ Editor state uploaded to Storage:', editorStateUrl);
+            } catch (error) {
+              console.error('❌ Failed to upload editor state during update:', error);
+              // Continue even if editor state upload fails
+            }
+          }
+
+          // Clean existing metadata (remove undefined values)
+          const existingMetadata = isFirestoreTexture.metadata || {};
+          const cleanExistingMetadata = Object.entries(existingMetadata).reduce((acc, [key, value]) => {
+            if (value !== undefined) {
+              acc[key] = value;
+            }
+            return acc;
+          }, {} as Record<string, unknown>);
+
+          // Update ONLY the existing Firestore document (no new document created)
+          await onUpdateTextureMetadata(editingTexture.id, {
+            name: designName || isFirestoreTexture.name,
+            url: newTextureUrl, // Update with new UV map URL
+            thumbnailUrl: newThumbnailUrl, // Update with new thumbnail URL
+            metadata: {
+              ...cleanExistingMetadata,
+              // Store the URL to the editor state JSON file, not the object itself
+              // (Firestore updateTexture filters out complex objects)
+              editorStateUrl: editorStateUrl,
+              prompt: `Custom UV Map${clientName ? ` for ${clientName}` : ''} created with Panel Editor`,
+              lastEditedAt: new Date().toISOString(),
+              lastEditedBy: userEmail || 'unknown'
+            }
+          });
+
+          console.log('✅ Firestore document updated successfully');
+
+          // Apply the new texture immediately to the 3D model
+          if (onTextureSelect) {
+            onTextureSelect(newTextureUrl)
+          }
+        } catch (error) {
+          console.error('Failed to update texture in Firestore:', error)
+        }
+      }
+
+      // Update local generated textures state
+      setGeneratedTextures(prev => prev.map(t =>
+        t.id === editingTexture.id
+          ? { ...t, thumbnail: displayThumbnail, imageData: uvMapUrl, name: designName || t.name }
+          : t
+      ))
+      setEditingTexture(null)
+    } else {
+      // Save to Firebase first if available (only if user is authenticated)
+      if (onSaveAITexture && userId) {
+        try {
+          await onSaveAITexture(
+            uvMapUrl,
+            designName || `UV_Map_${Date.now()}`,
+            `Custom UV Map${clientName ? ` for ${clientName}` : ''} created with Panel Editor`,
+            editorState, // Pass the complete editor state for restoration
+            displayThumbnail // Pass the thumbnail separately
+          )
+          // Don't create local generated texture since it's saved to Firebase
+          // The texture will appear in userTextures when the list reloads
+        } catch (error) {
+          console.error('🔍 DEBUG: Firebase save FAILED, but still NOT creating local texture to test')
+          console.error('Failed to save UV map to Firebase:', error)
+          // TODO: Show error to user instead of creating fallback
+          console.error('UV map could not be saved. Please try again.')
+        }
+      } else {
+        // No user authenticated, create local generated texture
+        const newTextureId = `uv_map_${Date.now()}`
+        setGeneratedTextures(prev => {
+          const filteredTextures = prev.filter(t => !t.id.startsWith('uv_map_'))
+
+          // Add the new UV map to local state
+          const newTexture = {
+            id: newTextureId,
+            name: designName || `UV Map ${new Date().toLocaleString()}`,
+            thumbnail: displayThumbnail,
+            isGenerated: true as const,
+            imageData: uvMapUrl
+          }
+
+          return [newTexture, ...filteredTextures]
+        })
+        // Apply the texture immediately
+        setInternalTexture(newTextureId)
+      }
+    }
   }
 
   // Function to download AI-generated texture
@@ -789,26 +794,45 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
     }
   }
 
-  // Function to delete generated texture
-  const deleteGeneratedTexture = async (textureId: string) => {
+  // Function to download user texture
+  const downloadUserTexture = async (textureObj: { id: string, name: string, thumbnail: string, isUserTexture: true, textureId: string }) => {
     try {
-      const response = await fetch('/api/delete-texture', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: textureId })
-      })
-      
-      if (response.ok) {
-        // Remove from generated textures list
-        setGeneratedTextures(prev => prev.filter(t => t.id !== textureId))
-        // If it was selected, clear selection
-        if (currentTexture === textureId) {
-          setInternalTexture('blank-template.png')
-        }
+      // For user textures, we need to fetch the image from Firebase Storage
+      const response = await fetch(textureObj.id) // textureObj.id is the Firebase Storage URL
+      if (!response.ok) {
+        throw new Error('Failed to fetch texture')
       }
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+
+      const link = document.createElement('a')
+      link.download = `${textureObj.name}.png`
+      link.href = url
+      link.click()
+
+      // Clean up the object URL
+      URL.revokeObjectURL(url)
     } catch (error) {
-      console.error('Failed to delete texture:', error)
+      console.error('Error downloading user texture:', error)
+      setAlertModal({
+        isOpen: true,
+        message: 'Failed to download texture. Please try again.',
+        type: 'error'
+      })
     }
+  }
+
+  // Function to delete generated texture (local cleanup only)
+  const deleteGeneratedTexture = (textureId: string) => {
+    // Remove from generated textures list (local state only)
+    setGeneratedTextures(prev => prev.filter(t => t.id !== textureId))
+
+    // If it was selected, clear selection
+    if (currentTexture === textureId) {
+      setInternalTexture('blank-template.png')
+    }
+
   }
 
   // Delete preset texture function
@@ -837,9 +861,22 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
         const textureObj = allTextures[idx];
         if (textureObj && !preloadedImages.has(textureObj.id)) {
           const img = new Image();
-          img.src = `/${textureObj.id}`;
+
+          // Use imageData for AI-generated textures, regular path for others
+          if ('imageData' in textureObj && textureObj.imageData && typeof textureObj.imageData === 'string' && textureObj.imageData.startsWith('data:')) {
+            img.src = textureObj.imageData;
+          } else if (textureObj.thumbnail && textureObj.thumbnail.startsWith('data:')) {
+            img.src = textureObj.thumbnail;
+          } else {
+            img.src = `/${textureObj.id}`;
+          }
+
           img.onload = () => {
             setPreloadedImages(prev => new Set(prev).add(textureObj.id));
+          };
+
+          img.onerror = () => {
+            // Silently ignore preload errors to avoid console spam
           };
         }
       });
@@ -847,7 +884,7 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
   }, [currentTexture, preloadedImages, presetTextures, generatedTextures])
 
   return (
-    <div className="w-full h-full flex flex-col md:flex-row canvas-container">
+    <div className="w-full h-full flex flex-col md:flex-row canvas-container scene-viewer-container">
       {/* 3D Viewer */}
       <div className="flex-1 relative order-1 md:order-1" style={{ 
         backgroundColor: backgroundColor,
@@ -855,9 +892,19 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
         backgroundSize: 'cover',
         backgroundPosition: 'center'
       }}>
+        {/* Loading Overlay */}
+        {isTextureLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-10 pointer-events-none">
+            <div className="bg-black/80 rounded-lg px-4 py-3 flex items-center gap-3">
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+              <span className="text-white text-sm">Loading texture...</span>
+            </div>
+          </div>
+        )}
+
         <Canvas
           ref={canvasRef}
-          camera={{ position: [0, 2, 14 + (Math.sqrt(numberOfUnits) - 1) * 5], fov: 45 }}
+          camera={{ position: [0, 0, 5 + (Math.sqrt(numberOfUnits) - 1) * 1.2], fov: 45 }}
           dpr={[1, 2]}
           gl={{
             antialias: true,
@@ -918,12 +965,26 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
           />
           
           <CameraController
-            position={cameraPresets[currentCameraAngle].position as [number, number, number]}
+            position={getCameraPosition()}
             target={cameraPresets[currentCameraAngle].target as [number, number, number]}
+            distance={cameraRotation.distance}
           />
 
           <Suspense fallback={null}>
-            <WaymoModel currentTexture={currentTexture} isRotating={isRotating} generatedTextures={generatedTextures} numberOfUnits={numberOfUnits} scenePosition={scenePosition} sceneRotation={sceneRotation} rotationSpeed={rotationSpeed} />
+            <WaymoModel
+              currentTexture={currentTexture}
+              isRotating={isRotating}
+              generatedTextures={generatedTextures}
+              userTextures={userTextures}
+              numberOfUnits={numberOfUnits}
+              formation={formation}
+              scatterSeed={scatterSeed}
+              scenePosition={scenePosition}
+              sceneRotation={sceneRotation}
+              rotationSpeed={rotationSpeed}
+              flagColor={flagColor}
+              onLoadingChange={setIsTextureLoading}
+            />
 
 
             {/* Person model for size comparison */}
@@ -977,7 +1038,7 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
             )}
 
             {/* Ground plane with gravel texture */}
-            <GroundPlane />
+            <GroundPlane floorMode={floorMode} floorColor={floorColor} />
 
             <ContactShadows
               position={[0, -1.19, 0]}
@@ -989,12 +1050,12 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
               color="#000000"
             />
           </Suspense>
-          
+
           <Preload all />
         </Canvas>
         
         {/* Camera Angle Controls */}
-        <div className="absolute bottom-4 right-4 flex flex-col gap-2 bg-black/80 backdrop-blur-md rounded-lg p-2 z-30">
+        <div className="absolute bottom-4 right-4 flex flex-col gap-2 bg-black/80 backdrop-blur-md rounded-lg p-2 z-10">
           <div className="text-white text-sm font-semibold mb-1">Camera Angles</div>
           {Object.entries(cameraPresets).map(([key, preset]) => (
             <button
@@ -1003,7 +1064,7 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                 setCurrentCameraAngle(key)
                 // Reset manual rotation when selecting a preset
                 if (key !== 'custom') {
-                  setCameraRotation({ azimuth: 0, elevation: 0, distance: 5 })
+                  setCameraRotation({ azimuth: 0, elevation: 0, distance: undefined })
                 }
               }}
               className={`px-3 py-1.5 rounded text-sm transition-all ${
@@ -1017,74 +1078,74 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
           ))}
         </div>
 
-        {/* Bottom Center Controls */}
-        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex gap-2 z-30">
-          <button
-            onClick={() => setIsRotating(!isRotating)}
-            className="px-3 py-1 bg-black/50 hover:bg-black/70 text-white rounded text-xs transition-colors flex items-center gap-1"
-            title={isRotating ? "Pause rotation" : "Resume rotation"}
-          >
-            {isRotating ? (
-              <>
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-                </svg>
-                Pause
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z"/>
-                </svg>
-                Play
-              </>
-            )}
-          </button>
+        {/* Bottom Controls - All Centered */}
+        <div className="absolute bottom-4 left-0 right-0 flex justify-center items-center px-4 z-30">
+          {/* Center Controls */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setIsRotating(!isRotating)}
+              className="px-3 py-1 bg-black/50 hover:bg-black/70 text-white rounded text-xs transition-colors flex items-center gap-1"
+              title={isRotating ? "Pause rotation" : "Resume rotation"}
+            >
+              {isRotating ? (
+                <>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                  </svg>
+                  Pause
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                  Play
+                </>
+              )}
+            </button>
 
-          <button
-            onClick={() => setShowPerson(!showPerson)}
-            className={`px-3 py-1 ${showPerson ? 'bg-white text-black' : 'bg-black/50 hover:bg-black/70 text-white'} rounded text-xs transition-colors flex items-center gap-1 show-person-button`}
-            title={showPerson ? "Hide person" : "Show person for size comparison"}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-            {showPerson ? 'Hide' : 'Show'} Person
-          </button>
+            <button
+              onClick={() => setShowPerson(!showPerson)}
+              className={`px-3 py-1 ${showPerson ? 'bg-white text-black' : 'bg-black/50 hover:bg-black/70 text-white'} rounded text-xs transition-colors flex items-center gap-1 show-person-button`}
+              title={showPerson ? "Hide person" : "Show person for size comparison"}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              {showPerson ? 'Hide' : 'Show'} Person
+            </button>
 
+            <button
+              onClick={downloadSnapshot}
+              className="px-3 py-1 bg-black/50 hover:bg-black/70 text-white rounded text-xs transition-colors flex items-center gap-1"
+              title="Download snapshot"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              Snapshot
+            </button>
 
-          <button
-            onClick={downloadSnapshot}
-            className="px-3 py-1 bg-black/50 hover:bg-black/70 text-white rounded text-xs transition-colors flex items-center gap-1"
-            title="Download snapshot"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            Snapshot
-          </button>
-          {userId && (
-            <>
+            {userId && (
               <button
                 onClick={() => setShowPublishModal(true)}
                 className="px-3 py-1 bg-black/50 hover:bg-black/70 text-white rounded text-xs transition-colors flex items-center gap-1"
-                title="Publish scene"
+                title="Share scene"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m9.032 4.026a9.001 9.001 0 01-7.432 0m9.432-4.026A9.001 9.001 0 0112 3c-4.474 0-8.268 3.12-9.243 7.342m9.243-7.342v12" />
                 </svg>
-                Publish
+                Share
               </button>
-            </>
-          )}
-          
-          {/* Scene Controls Button */}
-          <div className="relative">
-            <button
-              onClick={() => setShowControls(!showControls)}
-              className="px-3 py-1 bg-black/50 hover:bg-black/70 text-white rounded text-xs transition-colors flex items-center gap-1"
-              title="Scene Controls"
-            >
+            )}
+
+            {/* Scene Controls Button */}
+            <div className="relative">
+              <button
+                onClick={() => setShowControls(!showControls)}
+                className="px-3 py-1 bg-black/50 hover:bg-black/70 text-white rounded text-xs transition-colors flex items-center gap-1"
+                title="Scene Controls"
+              >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
               </svg>
@@ -1106,7 +1167,73 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                     className="w-full"
                   />
                 </div>
-                
+
+                {/* Formation Controls - Only show when multiple units */}
+                {numberOfUnits > 1 && (
+                  <div className="space-y-2">
+                    <label className="text-white text-xs font-semibold block">Formation</label>
+                    <div className="flex gap-2">
+                      {/* Grid Formation */}
+                      <button
+                        onClick={() => setFormation('grid')}
+                        className={`flex-1 p-2 rounded border-2 transition-all ${
+                          formation === 'grid'
+                            ? 'bg-white border-white text-black'
+                            : 'bg-transparent border-gray-600 text-white hover:border-white'
+                        }`}
+                        title="Grid Formation"
+                      >
+                        <svg className="w-6 h-6 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="3" y="3" width="7" height="7" />
+                          <rect x="14" y="3" width="7" height="7" />
+                          <rect x="3" y="14" width="7" height="7" />
+                          <rect x="14" y="14" width="7" height="7" />
+                        </svg>
+                      </button>
+
+                      {/* Line Formation */}
+                      <button
+                        onClick={() => setFormation('line')}
+                        className={`flex-1 p-2 rounded border-2 transition-all ${
+                          formation === 'line'
+                            ? 'bg-white border-white text-black'
+                            : 'bg-transparent border-gray-600 text-white hover:border-white'
+                        }`}
+                        title="Line Formation"
+                      >
+                        <svg className="w-6 h-6 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="4" cy="12" r="2" fill="currentColor" />
+                          <circle cx="12" cy="12" r="2" fill="currentColor" />
+                          <circle cx="20" cy="12" r="2" fill="currentColor" />
+                        </svg>
+                      </button>
+
+                      {/* Scatter Formation */}
+                      <button
+                        onClick={() => {
+                          setFormation('scatter');
+                          // Randomize the scatter pattern each time button is clicked
+                          setScatterSeed(prev => prev + 1);
+                        }}
+                        className={`flex-1 p-2 rounded border-2 transition-all ${
+                          formation === 'scatter'
+                            ? 'bg-white border-white text-black'
+                            : 'bg-transparent border-gray-600 text-white hover:border-white'
+                        }`}
+                        title="Scatter Formation (click to randomize)"
+                      >
+                        <svg className="w-6 h-6 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="6" cy="8" r="1.5" fill="currentColor" />
+                          <circle cx="15" cy="5" r="1.5" fill="currentColor" />
+                          <circle cx="18" cy="14" r="1.5" fill="currentColor" />
+                          <circle cx="8" cy="16" r="1.5" fill="currentColor" />
+                          <circle cx="12" cy="11" r="1.5" fill="currentColor" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Animation Speed Control */}
                 <div className="space-y-2">
                   <label className="text-white text-xs font-semibold block">Animation Speed: {(rotationSpeed * 100).toFixed(0)}%</label>
@@ -1120,105 +1247,30 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                     className="w-full"
                   />
                 </div>
-                
-                {/* Scene Rotation Controls */}
+
+                {/* Camera Zoom Control */}
                 <div className="space-y-2">
-                  <label className="text-white text-xs font-semibold block">Rotation</label>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <label className="text-white text-xs w-4">X:</label>
-                      <input
-                        type="range"
-                        min="-3.14"
-                        max="3.14"
-                        step="0.1"
-                        value={sceneRotation.x}
-                        onChange={(e) => setSceneRotation(prev => ({ ...prev, x: parseFloat(e.target.value) }))}
-                        className="flex-1"
-                      />
-                      <span className="text-white text-xs w-8 text-right">{(sceneRotation.x * 180 / Math.PI).toFixed(0)}°</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-white text-xs w-4">Y:</label>
-                      <input
-                        type="range"
-                        min="-3.14"
-                        max="3.14"
-                        step="0.1"
-                        value={sceneRotation.y}
-                        onChange={(e) => setSceneRotation(prev => ({ ...prev, y: parseFloat(e.target.value) }))}
-                        className="flex-1"
-                      />
-                      <span className="text-white text-xs w-8 text-right">{(sceneRotation.y * 180 / Math.PI).toFixed(0)}°</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-white text-xs w-4">Z:</label>
-                      <input
-                        type="range"
-                        min="-3.14"
-                        max="3.14"
-                        step="0.1"
-                        value={sceneRotation.z}
-                        onChange={(e) => setSceneRotation(prev => ({ ...prev, z: parseFloat(e.target.value) }))}
-                        className="flex-1"
-                      />
-                      <span className="text-white text-xs w-8 text-right">{(sceneRotation.z * 180 / Math.PI).toFixed(0)}°</span>
-                    </div>
+                  <label className="text-white text-xs font-semibold block">
+                    Camera Zoom: {cameraRotation.distance !== undefined ? cameraRotation.distance.toFixed(1) : 'Auto'}
+                  </label>
+                  <input
+                    type="range"
+                    min="2"
+                    max="15"
+                    step="0.5"
+                    value={cameraRotation.distance ?? 5}
+                    onChange={(e) => {
+                      setCameraRotation(prev => ({ ...prev, distance: parseFloat(e.target.value) }))
+                      setCurrentCameraAngle('custom')
+                    }}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-white text-xs opacity-70">
+                    <span>Zoomed In</span>
+                    <span>Zoomed Out</span>
                   </div>
                 </div>
-                
-                {/* Scene Position Controls */}
-                <div className="space-y-2">
-                  <label className="text-white text-xs font-semibold block">Position</label>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <label className="text-white text-xs w-4">X:</label>
-                      <input
-                        type="range"
-                        min="-5"
-                        max="5"
-                        step="0.1"
-                        value={scenePosition.x}
-                        onChange={(e) => setScenePosition(prev => ({ ...prev, x: parseFloat(e.target.value) }))}
-                        className="flex-1"
-                      />
-                      <span className="text-white text-xs w-8 text-right">{scenePosition.x.toFixed(1)}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-white text-xs w-4">Y:</label>
-                      <input
-                        type="range"
-                        min="-5"
-                        max="5"
-                        step="0.1"
-                        value={scenePosition.y}
-                        onChange={(e) => setScenePosition(prev => ({ ...prev, y: parseFloat(e.target.value) }))}
-                        className="flex-1"
-                      />
-                      <span className="text-white text-xs w-8 text-right">{scenePosition.y.toFixed(1)}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-white text-xs w-4">Z:</label>
-                      <input
-                        type="range"
-                        min="-5"
-                        max="5"
-                        step="0.1"
-                        value={scenePosition.z}
-                        onChange={(e) => setScenePosition(prev => ({ ...prev, z: parseFloat(e.target.value) }))}
-                        className="flex-1"
-                      />
-                      <span className="text-white text-xs w-8 text-right">{scenePosition.z.toFixed(1)}</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setScenePosition({ x: 0, y: 0, z: 0 })}
-                    className="w-full px-2 py-1 bg-white hover:bg-black hover:text-white text-black border border-black rounded text-xs transition-colors mt-2"
-                  >
-                    Reset Position
-                  </button>
-                </div>
-                
+
                 {/* Camera Rotation Controls */}
                 <div className="space-y-2 border-t border-white/20 pt-2">
                   <label className="text-white text-xs font-semibold block">Camera Rotation</label>
@@ -1232,8 +1284,14 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                         step="0.05"
                         value={cameraRotation.azimuth}
                         onChange={(e) => {
-                          setCameraRotation(prev => ({ ...prev, azimuth: parseFloat(e.target.value) }))
-                          setCurrentCameraAngle('custom')
+                          const newAzimuth = parseFloat(e.target.value);
+                          console.log('🎚️ ORBIT SLIDER CHANGED:', newAzimuth, 'degrees:', (newAzimuth * 180 / Math.PI).toFixed(0));
+                          setCameraRotation(prev => {
+                            const newState = { ...prev, azimuth: newAzimuth };
+                            console.log('📊 Camera rotation state updated:', newState);
+                            return newState;
+                          });
+                          setCurrentCameraAngle('custom');
                         }}
                         className="flex-1"
                       />
@@ -1243,38 +1301,28 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                       <label className="text-white text-xs w-16">Height:</label>
                       <input
                         type="range"
-                        min="-1.57"
+                        min="0"
                         max="1.57"
                         step="0.05"
                         value={cameraRotation.elevation}
                         onChange={(e) => {
-                          setCameraRotation(prev => ({ ...prev, elevation: parseFloat(e.target.value) }))
-                          setCurrentCameraAngle('custom')
+                          const newElevation = parseFloat(e.target.value);
+                          console.log('🎚️ HEIGHT SLIDER CHANGED:', newElevation, 'degrees:', (newElevation * 180 / Math.PI).toFixed(0));
+                          setCameraRotation(prev => {
+                            const newState = { ...prev, elevation: newElevation };
+                            console.log('📊 Camera rotation state updated:', newState);
+                            return newState;
+                          });
+                          setCurrentCameraAngle('custom');
                         }}
                         className="flex-1"
                       />
                       <span className="text-white text-xs w-10 text-right">{(cameraRotation.elevation * 180 / Math.PI).toFixed(0)}°</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-white text-xs w-16">Distance:</label>
-                      <input
-                        type="range"
-                        min="2"
-                        max="15"
-                        step="0.5"
-                        value={cameraRotation.distance}
-                        onChange={(e) => {
-                          setCameraRotation(prev => ({ ...prev, distance: parseFloat(e.target.value) }))
-                          setCurrentCameraAngle('custom')
-                        }}
-                        className="flex-1"
-                      />
-                      <span className="text-white text-xs w-10 text-right">{cameraRotation.distance.toFixed(1)}</span>
-                    </div>
                   </div>
                   <button
                     onClick={() => {
-                      setCameraRotation({ azimuth: 0, elevation: 0, distance: 5 })
+                      setCameraRotation({ azimuth: 0, elevation: 0, distance: undefined })
                       setCurrentCameraAngle('threequarter')
                     }}
                     className="w-full px-2 py-1 bg-white hover:bg-black hover:text-white text-black border border-black rounded text-xs transition-colors mt-2"
@@ -1283,59 +1331,242 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                   </button>
                 </div>
 
-                {/* Reset All Button */}
-                <div className="border-t border-white/20 pt-2">
-                  <button
-                    onClick={() => {
-                      setScenePosition({ x: 0, y: 0, z: 0 })
-                      setSceneRotation({ x: 0, y: 0, z: 0 })
-                      setCameraRotation({ azimuth: 0, elevation: 0, distance: 5 })
-                      setCurrentCameraAngle('threequarter')
-                    }}
-                    className="w-full px-2 py-1 bg-white hover:bg-black hover:text-white text-black border border-black rounded text-xs transition-colors"
-                  >
-                    Reset All Transforms
-                  </button>
+                {/* Background Controls Section */}
+                <div className="space-y-2 border-t border-white/20 pt-4">
+                  <label className="text-white text-xs font-semibold block">Background</label>
+
+                  {/* Quick Background Options */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* Background Color Picker */}
+                    <label className="relative overflow-hidden rounded border border-gray-600 hover:border-white cursor-pointer">
+                      <input
+                        type="color"
+                        value={backgroundColor}
+                        onChange={(e) => {
+                          setBackgroundColor(e.target.value)
+                          setBackgroundImage(null)
+                          setSkyboxPreset(null)
+                        }}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      />
+                      <div className="w-full h-12 flex flex-col items-center justify-center" style={{ backgroundColor }}>
+                        <span className="text-white text-xs font-semibold drop-shadow-lg">Color</span>
+                      </div>
+                    </label>
+
+                    {/* Upload Background */}
+                    <label className="relative overflow-hidden rounded border border-gray-600 hover:border-white bg-gray-700 cursor-pointer">
+                      <input
+                        type="file"
+                        accept="image/*,.exr,.hdr"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) {
+                            const reader = new FileReader()
+                            reader.onloadend = () => {
+                              const dataUrl = reader.result as string
+                              const uploadId = `uploaded_bg_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`
+                              const newUploadedBg = {
+                                id: uploadId,
+                                url: dataUrl,
+                                name: file.name
+                              }
+                              setUploadedBackgrounds(prev => [...prev, newUploadedBg])
+                              setBackgroundImage(dataUrl)
+                              setSkyboxPreset(null)
+                            }
+                            reader.readAsDataURL(file)
+                          }
+                        }}
+                        className="hidden"
+                      />
+                      <div className="w-full h-12 flex flex-col items-center justify-center">
+                        <span className="text-white text-xs font-semibold">Upload</span>
+                      </div>
+                    </label>
+
+                    {/* Dark Preset */}
+                    <button
+                      onClick={() => {
+                        setBackgroundImage(null)
+                        setBackgroundColor('#1a1a1a')
+                        setSkyboxPreset(null)
+                      }}
+                      className={`rounded border ${
+                        backgroundColor === '#1a1a1a' && !backgroundImage && !skyboxPreset
+                          ? 'border-white'
+                          : 'border-gray-600 hover:border-white'
+                      }`}
+                    >
+                      <div className="w-full h-12 bg-gray-800 flex items-center justify-center">
+                        <span className="text-white text-xs font-semibold">Dark</span>
+                      </div>
+                    </button>
+
+                    {/* Sky Preset */}
+                    <button
+                      onClick={() => {
+                        setBackgroundImage(null)
+                        setBackgroundColor('#1a1a1a')
+                        setSkyboxPreset('park')
+                      }}
+                      className={`rounded border ${
+                        skyboxPreset === 'park' && !backgroundImage
+                          ? 'border-white'
+                          : 'border-gray-600 hover:border-white'
+                      }`}
+                    >
+                      <div className="w-full h-12 bg-gradient-to-b from-blue-400 to-green-300 flex items-center justify-center">
+                        <span className="text-white text-xs font-semibold">Sky</span>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Show background gallery if backgrounds exist */}
+                  {(uploadedBackgrounds.length > 0 || generatedBackgrounds.length > 0) && (
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {uploadedBackgrounds.map((bg) => (
+                        <button
+                          key={bg.id}
+                          onClick={() => {
+                            setBackgroundImage(bg.url)
+                            setSkyboxPreset(null)
+                          }}
+                          className={`w-full text-left px-2 py-1 rounded text-xs ${
+                            backgroundImage === bg.url
+                              ? 'bg-white text-black'
+                              : 'bg-gray-800 text-white hover:bg-gray-700'
+                          }`}
+                        >
+                          {bg.name}
+                        </button>
+                      ))}
+                      {generatedBackgrounds.map((bg) => (
+                        <button
+                          key={bg.id}
+                          onClick={() => {
+                            setBackgroundImage(bg.url)
+                            setSkyboxPreset(null)
+                          }}
+                          className={`w-full text-left px-2 py-1 rounded text-xs ${
+                            backgroundImage === bg.url
+                              ? 'bg-white text-black'
+                              : 'bg-gray-800 text-white hover:bg-gray-700'
+                          }`}
+                        >
+                          Generated BG
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Floor Controls Section */}
+                <div className="space-y-2 border-t border-white/20 pt-4">
+                  <label className="text-white text-xs font-semibold block">Floor</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* Asphalt (Default) */}
+                    <button
+                      onClick={() => setFloorMode('asphalt')}
+                      className={`rounded border ${
+                        floorMode === 'asphalt'
+                          ? 'border-white'
+                          : 'border-gray-600 hover:border-white'
+                      }`}
+                    >
+                      <div className="w-full h-12 bg-gradient-to-br from-gray-600 to-gray-800 flex items-center justify-center">
+                        <span className="text-white text-xs font-semibold">Asphalt</span>
+                      </div>
+                    </button>
+
+                    {/* Custom Color */}
+                    <label className="relative overflow-hidden rounded border cursor-pointer">
+                      <input
+                        type="color"
+                        value={floorColor}
+                        onChange={(e) => {
+                          setFloorColor(e.target.value)
+                          setFloorMode('custom')
+                        }}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      />
+                      <div className={`w-full h-12 flex items-center justify-center border ${
+                        floorMode === 'custom'
+                          ? 'border-white'
+                          : 'border-gray-600 hover:border-white'
+                      }`} style={{ backgroundColor: floorColor }}>
+                        <span className="text-white text-xs font-semibold drop-shadow-lg">Custom</span>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
             )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Gallery Panel */}
       <div className="w-full md:w-64 h-40 md:h-full bg-black p-4 overflow-hidden order-2 md:order-2 flex flex-col">
-        {/* Gallery Toggle */}
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => setGalleryMode('texture')}
-            className={`flex-1 px-3 py-1 rounded text-sm font-semibold transition-colors ${
-              galleryMode === 'texture'
-                ? 'bg-white text-black'
-                : 'bg-black text-white hover:bg-white hover:text-black'
-            }`}
-          >
-            Texture
-          </button>
-          <button
-            onClick={() => setGalleryMode('background')}
-            className={`flex-1 px-3 py-1 rounded text-sm font-semibold transition-colors ${
-              galleryMode === 'background'
-                ? 'bg-white text-black'
-                : 'bg-black text-white hover:bg-white hover:text-black'
-            }`}
-          >
-            Background
-          </button>
-        </div>
-
-        {galleryMode === 'texture' ? (
+        {/* Library - texture only */}
           <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Design Editor button - spans full width above library */}
+            <button
+              onClick={() => setShowUVPanelEditor(true)}
+              className="relative overflow-hidden rounded-lg border-2 transition-all mb-4 border-gray-600/50 bg-gray-700 hover:bg-gray-600 text-white font-inter"
+            >
+              <div className="w-full h-12 flex items-center justify-center">
+                <span className="text-xl mr-2">✨</span>
+                <span className="text-white text-sm font-semibold">Create a Design</span>
+              </div>
+            </button>
+
+            {/* Library Tabs */}
+            <div className="flex gap-1 mb-2">
+              <button
+                onClick={() => setActiveLibraryTab('my-designs')}
+                className={`flex-1 px-3 py-1 rounded text-xs font-semibold transition-colors ${
+                  activeLibraryTab === 'my-designs'
+                    ? 'bg-white text-black'
+                    : 'bg-gray-800 text-white hover:bg-gray-700'
+                }`}
+              >
+                My Designs
+              </button>
+              <button
+                onClick={() => setActiveLibraryTab('past-clients')}
+                className={`flex-1 px-3 py-1 rounded text-xs font-semibold transition-colors ${
+                  activeLibraryTab === 'past-clients'
+                    ? 'bg-white text-black'
+                    : 'bg-gray-800 text-white hover:bg-gray-700'
+                }`}
+              >
+                Past Clients
+              </button>
+              <button
+                onClick={() => setActiveLibraryTab('saved-snapshots')}
+                className={`flex-1 px-3 py-1 rounded text-xs font-semibold transition-colors ${
+                  activeLibraryTab === 'saved-snapshots'
+                    ? 'bg-white text-black'
+                    : 'bg-gray-800 text-white hover:bg-gray-700'
+                }`}
+              >
+                Snapshots
+              </button>
+            </div>
+
+            {/* View controls */}
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-white text-lg font-semibold hidden md:block">My Library</h3>
+              <h3 className="text-white text-sm font-medium hidden md:block">
+                {activeLibraryTab === 'my-designs' ? 'My Designs' : activeLibraryTab === 'past-clients' ? 'Past Clients' : 'Saved Snapshots'}
+              </h3>
               <div className="flex gap-1">
                 <button
-                  onClick={() => setGalleryView('card')}
+                  onClick={() => {
+                    setGalleryView('card');
+                    setUserHasManuallySetView(true);
+                  }}
                   className={`p-1 rounded ${galleryView === 'card' ? 'bg-white text-black' : 'bg-black text-white'}`}
                   title="Card view"
                 >
@@ -1344,7 +1575,10 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                   </svg>
                 </button>
                 <button
-                  onClick={() => setGalleryView('list')}
+                  onClick={() => {
+                    setGalleryView('list');
+                    setUserHasManuallySetView(true);
+                  }}
                   className={`p-1 rounded ${galleryView === 'list' ? 'bg-white text-black' : 'bg-black text-white'}`}
                   title="List view"
                 >
@@ -1356,69 +1590,76 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
             </div>
             <div className={`flex-1 overflow-x-auto md:overflow-y-auto overflow-y-hidden md:overflow-x-hidden ${
               galleryView === 'card'
-                ? 'flex md:grid md:grid-cols-2 gap-2'
+                ? 'flex md:grid md:grid-cols-2 md:auto-rows-min gap-x-1 gap-y-1'
                 : 'flex flex-col gap-1'
             }`}>
-          {/* Upload UV Mock button */}
-          <label className="relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 border-[#212121]/50 bg-[#212121] hover:bg-[#212121]/80 text-white cursor-pointer">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (file) {
-                  // Create a unique filename for the uploaded mock
-                  const timestamp = Date.now()
-                  const filename = `uv_mock_${timestamp}.jpg`
-                  
-                  // Read the file and add to textures
-                  const reader = new FileReader()
-                  reader.onloadend = () => {
-                    const newTexture = {
-                      id: filename,
-                      name: `Upload: ${file.name.slice(0, 15)}...`,
-                      thumbnail: reader.result as string,
-                      isGenerated: true as const
-                    }
-                    setGeneratedTextures(prev => [...prev, newTexture])
-                    setInternalTexture(filename)
-                    
-                    // Save the file (would need an upload endpoint in production)
-                    // For now, it's stored in memory as base64
-                  }
-                  reader.readAsDataURL(file)
+          {/* Filter textures based on active tab */}
+          {(() => {
+            if (activeLibraryTab === 'my-designs') {
+              // Show user textures and generated textures for "My Designs"
+              // console.log('📚 Library Display - My Designs Tab:', {
+              //   generatedTexturesCount: generatedTextures.length,
+              //   userTexturesCount: userTextures.length,
+              //   userTextures: userTextures.map(t => ({ id: t.id, name: t.name, url: t.url?.substring(0, 50) + '...' }))
+              // });
+
+              const myDesigns = [...generatedTextures, ...userTextures.map(t => ({
+                id: t.url,
+                name: t.name,
+                thumbnail: t.thumbnailUrl || t.url,
+                isUserTexture: true,
+                textureId: t.id
+              }))];
+
+              // console.log('📚 Combined designs before filtering:', myDesigns.length);
+
+              // Filter out duplicates and invalid entries
+              const uniqueDesigns = myDesigns.filter((design, index, array) => {
+                // Remove entries that look like the old blank template
+                if (design.name === 'Blank' && design.id.includes('blank-template')) {
+                  return false;
                 }
-              }}
-              className="hidden"
-            />
-            <div className="w-24 md:w-full h-24 md:h-20 flex flex-col items-center justify-center">
-              <svg className="w-8 h-8 text-white mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <span className="text-white text-xs md:text-sm font-semibold">Upload</span>
-            </div>
-          </label>
-          
-          {/* Generate with AI button */}
-          <button
-            onClick={() => setShowGenerateModal(true)}
-            className="relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 border-[#212121]/50 bg-[#212121] hover:bg-[#212121]/80 text-white"
-          >
-            <div className="w-24 md:w-full h-24 md:h-20 flex flex-col items-center justify-center">
-              <svg className="w-8 h-8 text-white mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-              <span className="text-white text-xs md:text-sm font-semibold">Generate</span>
-            </div>
-          </button>
-          {/* Combine all texture sources */}
-          {[...presetTextures.map(t => ({ ...t, isPreset: true })), ...generatedTextures, ...userTextures.map(t => ({
-            id: t.url,
-            name: t.name,
-            thumbnail: t.thumbnailUrl || t.url,
-            isUserTexture: true,
-            textureId: t.id
-          }))].map((textureObj) => {
+
+                // Keep all generated textures - they might be saved to Firebase
+                // Only remove if there's truly no data
+                if ('isGenerated' in design && design.isGenerated) {
+                  const generatedTexture = design as { id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string };
+                  // Only filter out if there's absolutely no image data or thumbnail
+                  if (!generatedTexture.imageData && !generatedTexture.thumbnail) {
+                    return false;
+                  }
+                }
+
+                // Deduplicate by ID
+                return array.findIndex(d => d.id === design.id) === index;
+              });
+
+              // console.log('📚 Unique designs after filtering:', uniqueDesigns.length);
+
+              // Show empty state if no designs
+              if (uniqueDesigns.length === 0) {
+                if (galleryView === 'list') {
+                  return (
+                    <div className="flex items-center gap-2 p-2 text-gray-400">
+                      <span className="text-lg">🎨</span>
+                      <div>
+                        <p className="text-sm">No designs yet</p>
+                        <p className="text-xs opacity-75">Use Create a Design to create your first texture</p>
+                      </div>
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-center px-4">
+                      <span className="text-2xl mb-2">🎨</span>
+                      <p className="text-sm">No designs yet</p>
+                      <p className="text-xs opacity-75">Use Create a Design to create your first texture</p>
+                    </div>
+                  );
+                }
+              }
+
+              return uniqueDesigns.map((textureObj) => {
             const isPreloaded = preloadedImages.has(textureObj.id)
             const isGenerated = 'isGenerated' in textureObj && textureObj.isGenerated
             const isUserTexture = 'isUserTexture' in textureObj && textureObj.isUserTexture
@@ -1430,15 +1671,11 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                 <div key={textureObj.id} className="relative group flex items-center gap-2 p-2 hover:bg-white/10 rounded">
                   <button
                     onClick={() => {
-                      if (isUserTexture && onTextureSelect) {
+                      // Update internal texture for all texture types
+                      setInternalTexture(textureObj.id)
+                      // Also notify parent if callback exists
+                      if (onTextureSelect) {
                         onTextureSelect(textureObj.id)
-                      } else {
-                        // For preset and generated textures
-                        setInternalTexture(textureObj.id)
-                        // Also notify parent if callback exists
-                        if (onTextureSelect) {
-                          onTextureSelect(textureObj.id)
-                        }
                       }
                     }}
                     className={`flex items-center gap-2 flex-1 ${
@@ -1467,81 +1704,177 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                     <span className="text-sm truncate">{textureObj.name}</span>
                     {isPreloaded && <span className="text-green-400">✓</span>}
                   </button>
-                  {(isGenerated || isUserTexture || ('isPreset' in textureObj && textureObj.isPreset)) && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        if (isGenerated) {
+                  {isGenerated && (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleEditTexture(textureObj as { id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string })
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-blue-500 hover:text-blue-400 mr-1"
+                        title="Edit texture"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          downloadTexture(textureObj as { id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string })
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-white hover:text-gray-300 mr-1"
+                        title="Download texture"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
                           setConfirmModal({
                             isOpen: true,
                             action: () => deleteGeneratedTexture(textureObj.id),
                             message: 'Delete this generated texture?'
                           })
-                        } else if (isUserTexture && 'textureId' in textureObj && onDeleteUserTexture) {
-                          // Handle user texture deletion through Firebase
-                          setConfirmModal({
-                            isOpen: true,
-                            action: () => onDeleteUserTexture(textureObj.textureId),
-                            message: 'Delete this texture from your library?'
-                          })
-                        } else if ('isPreset' in textureObj && textureObj.isPreset) {
-                          // Handle preset texture deletion
-                          setConfirmModal({
-                            isOpen: true,
-                            action: () => deletePresetTexture(textureObj.id),
-                            message: 'Delete this preset texture?'
-                          })
-                        }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400"
+                        title="Delete texture"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                  {isUserTexture && (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleEditUserTexture(textureObj as { id: string, name: string, thumbnail: string, isUserTexture: true, textureId: string })
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-blue-500 hover:text-blue-400 mr-1"
+                        title="Edit texture"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          downloadUserTexture(textureObj as { id: string, name: string, thumbnail: string, isUserTexture: true, textureId: string })
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-white hover:text-gray-300 mr-1"
+                        title="Download texture"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          console.log('🏷️ Rename button clicked:', { textureObj, hasTextureId: 'textureId' in textureObj })
+                          if ('textureId' in textureObj) {
+                            console.log('✅ Opening rename modal for:', textureObj.name, textureObj.textureId)
+                            setRenameModal({
+                              isOpen: true,
+                              textureId: textureObj.textureId,
+                              currentName: textureObj.name
+                            })
+                            setNewTextureName(textureObj.name)
+                          } else {
+                            console.warn('❌ textureId not found in textureObj:', textureObj)
+                          }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-blue-500 hover:text-blue-400"
+                        title="Rename design"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if ('textureId' in textureObj && onDeleteUserTexture) {
+                            setConfirmModal({
+                              isOpen: true,
+                              action: () => onDeleteUserTexture(textureObj.textureId),
+                              message: 'Delete this texture from your library?'
+                            })
+                          }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400"
+                        title="Delete texture"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                  {(('isPreset' in textureObj && textureObj.isPreset) ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmModal({
+                          isOpen: true,
+                          action: () => deletePresetTexture(textureObj.id),
+                          message: 'Delete this preset texture?'
+                        })
                       }}
                       className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400"
+                      title="Delete texture"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </button>
-                  )}
+                  ) : null)}
                 </div>
               )
             }
 
             return (
-              <div key={textureObj.id} className="relative group flex-shrink-0">
+              <div key={textureObj.id} className="relative group flex-shrink-0 h-fit">
                 <button
                   onClick={() => {
-                    if (isUserTexture && onTextureSelect) {
+                    // Update internal texture for all texture types
+                    setInternalTexture(textureObj.id)
+                    // Also notify parent if callback exists
+                    if (onTextureSelect) {
                       onTextureSelect(textureObj.id)
-                    } else {
-                      // For preset and generated textures
-                      setInternalTexture(textureObj.id)
-                      // Also notify parent if callback exists
-                      if (onTextureSelect) {
-                        onTextureSelect(textureObj.id)
-                      }
                     }
                   }}
-                  className={`relative overflow-hidden rounded-lg transition-all w-full h-full ${
+                  className={`relative overflow-hidden rounded-lg transition-all w-full ${
                     currentTexture === textureObj.id
                       ? 'border-2 border-white shadow-lg shadow-white/30'
                       : 'hover:opacity-80'
                   }`}
                 >
-                  {textureObj.thumbnail ? (
-                    <CachedImage
-                      src={textureObj.thumbnail}
-                      alt={`${textureObj.name} logo`}
-                      className="w-24 md:w-full h-24 md:h-20 object-cover"
-                      priority={currentTexture === textureObj.id}
-                    />
-                  ) : textureObj.name === 'Blank' ? (
-                    <div className="w-24 md:w-full h-24 md:h-20 bg-white" />
-                  ) : (
-                    <CachedImage
-                      src={`/${textureObj.id}`}
-                      alt={`Texture ${textureObj.id}`}
-                      className="w-24 md:w-full h-24 md:h-20 object-cover"
-                      priority={currentTexture === textureObj.id}
-                    />
-                  )}
+                  <div className="w-full aspect-square">
+                    {textureObj.thumbnail ? (
+                      <CachedImage
+                        src={textureObj.thumbnail}
+                        alt={`${textureObj.name} logo`}
+                        className="w-full h-full object-cover"
+                        priority={currentTexture === textureObj.id}
+                      />
+                    ) : textureObj.name === 'Blank' ? (
+                      <div className="w-full h-full bg-white" />
+                    ) : (
+                      <CachedImage
+                        src={`/${textureObj.id}`}
+                        alt={`Texture ${textureObj.id}`}
+                        className="w-full h-full object-cover"
+                        priority={currentTexture === textureObj.id}
+                      />
+                    )}
+                  </div>
                   <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs p-1 text-center">
                     <span className="hidden md:inline">{textureObj.name}</span>
                     {isPreloaded && <span className="ml-1 text-green-400">✓</span>}
@@ -1549,6 +1882,18 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                 </button>
                 {isGenerated ? (
                   <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleEditTexture(textureObj as { id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string })
+                      }}
+                      className="absolute top-1 right-16 bg-blue-500 hover:bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      title="Edit texture"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -1579,24 +1924,50 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                     </button>
                   </>
                 ) : isUserTexture ? (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if ('textureId' in textureObj && onDeleteUserTexture) {
-                        setConfirmModal({
-                          isOpen: true,
-                          action: () => onDeleteUserTexture(textureObj.textureId),
-                          message: 'Delete this texture from your library?'
-                        })
-                      }
-                    }}
-                    className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                    title="Delete texture"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleEditUserTexture(textureObj as { id: string, name: string, thumbnail: string, isUserTexture: true, textureId: string })
+                      }}
+                      className="absolute top-1 right-16 bg-blue-500 hover:bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      title="Edit texture"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        downloadUserTexture(textureObj as { id: string, name: string, thumbnail: string, isUserTexture: true, textureId: string })
+                      }}
+                      className="absolute top-1 right-8 bg-white hover:bg-black hover:text-white text-black rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10 border border-black"
+                      title="Download texture"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if ('textureId' in textureObj && onDeleteUserTexture) {
+                          setConfirmModal({
+                            isOpen: true,
+                            action: () => onDeleteUserTexture(textureObj.textureId),
+                            message: 'Delete this texture from your library?'
+                          })
+                        }
+                      }}
+                      className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      title="Delete texture"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </>
                 ) : ('isPreset' in textureObj && textureObj.isPreset) ? (
                   <button
                     onClick={(e) => {
@@ -1617,259 +1988,278 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                 ) : null}
               </div>
             )
-          })}
+              });
+            } else if (activeLibraryTab === 'past-clients') {
+              // Show preset textures for "Past Clients"
+              return presetTextures.map(t => ({ ...t, isPreset: true })).map((textureObj) => {
+                const isPreloaded = preloadedImages.has(textureObj.id)
+                // const isGenerated = 'isGenerated' in textureObj && textureObj.isGenerated
+                // const isUserTexture = 'isUserTexture' in textureObj && textureObj.isUserTexture
+                const isPreset = 'isPreset' in textureObj && textureObj.isPreset
+
+                if (galleryView === 'list') {
+                  return (
+                    <div key={textureObj.id} className="relative group flex items-center gap-2 p-2 hover:bg-white/10 rounded">
+                      <button
+                        onClick={() => {
+                          setInternalTexture(textureObj.id)
+                          if (onTextureSelect) {
+                            onTextureSelect(textureObj.id)
+                          }
+                        }}
+                        className={`flex items-center gap-2 flex-1 ${
+                          currentTexture === textureObj.id ? 'text-blue-400' : 'text-white'
+                        }`}
+                      >
+                        <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0">
+                          {textureObj.thumbnail ? (
+                            <CachedImage
+                              src={textureObj.thumbnail}
+                              alt={`${textureObj.name} logo`}
+                              className="w-full h-full object-cover"
+                              priority={currentTexture === textureObj.id}
+                            />
+                          ) : textureObj.name === 'Blank' ? (
+                            <div className="w-full h-full bg-white" />
+                          ) : (
+                            <CachedImage
+                              src={`/${textureObj.id}`}
+                              alt={textureObj.name}
+                              className="w-full h-full object-cover"
+                              priority={currentTexture === textureObj.id}
+                            />
+                          )}
+                        </div>
+                        <span className="text-xs truncate">{textureObj.name}</span>
+                      </button>
+
+                      {isPreset && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setConfirmModal({
+                              isOpen: true,
+                              action: () => deletePresetTexture(textureObj.id),
+                              message: 'Delete this preset texture?'
+                            })
+                          }}
+                          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          title="Delete preset texture"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  )
+                } else {
+                  return (
+                    <div key={textureObj.id} className="relative group h-fit">
+                      <button
+                        onClick={() => {
+                          setInternalTexture(textureObj.id)
+                          if (onTextureSelect) {
+                            onTextureSelect(textureObj.id)
+                          }
+                        }}
+                        onMouseEnter={() => {
+                          // Preload texture on hover for faster switching
+                          const img = new Image()
+                          if (textureObj.thumbnail) {
+                            img.src = textureObj.thumbnail
+                          } else if (textureObj.id !== 'Blank') {
+                            img.src = `/${textureObj.id}`
+                          }
+                        }}
+                        className={`relative w-full overflow-hidden rounded-lg border-2 transition-all ${
+                          currentTexture === textureObj.id
+                            ? 'border-blue-400 shadow-lg shadow-blue-400/30'
+                            : isPreloaded
+                            ? 'border-gray-400'
+                            : 'border-gray-600 hover:border-gray-400'
+                        }`}
+                        title={textureObj.name}
+                      >
+                        <div className="w-full aspect-square">
+                          {textureObj.thumbnail ? (
+                            <CachedImage
+                              src={textureObj.thumbnail}
+                              alt={`${textureObj.name} logo`}
+                              className="w-full h-full object-cover"
+                              priority={currentTexture === textureObj.id}
+                            />
+                          ) : textureObj.name === 'Blank' ? (
+                            <div className="w-full h-full bg-white" />
+                          ) : (
+                            <CachedImage
+                              src={`/${textureObj.id}`}
+                              alt={textureObj.name}
+                              className="w-full h-full object-cover"
+                              priority={currentTexture === textureObj.id}
+                            />
+                          )}
+                        </div>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs p-1 text-center">
+                          <span className="truncate block">{textureObj.name}</span>
+                        </div>
+                      </button>
+
+                      {isPreset && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setConfirmModal({
+                              isOpen: true,
+                              action: () => deletePresetTexture(textureObj.id),
+                              message: 'Delete this preset texture?'
+                            })
+                          }}
+                          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          title="Delete preset texture"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  )
+                }
+              });
+            } else if (activeLibraryTab === 'saved-snapshots') {
+              // Show saved snapshots
+              if (savedSnapshots.length === 0) {
+                return (
+                  <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-center px-4">
+                    <span className="text-2xl mb-2">📸</span>
+                    <p className="text-sm">No saved snapshots yet</p>
+                    <p className="text-xs opacity-75">Generate backgrounds from snapshots to save them here</p>
+                  </div>
+                );
+              }
+
+              return savedSnapshots.map((snapshot) => {
+                if (galleryView === 'list') {
+                  return (
+                    <div key={snapshot.id} className="relative group flex items-center gap-2 p-2 hover:bg-white/10 rounded">
+                      <button
+                        onClick={() => setSelectedSnapshotForPreview(snapshot)}
+                        className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                      >
+                        <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0">
+                          <img
+                            src={snapshot.url}
+                            alt={snapshot.prompt}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-white truncate">{snapshot.prompt}</p>
+                          <p className="text-xs text-gray-400">{new Date(snapshot.timestamp).toLocaleDateString()}</p>
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          const link = document.createElement('a')
+                          link.href = snapshot.url
+                          link.download = `snapshot-${snapshot.timestamp}.jpg`
+                          link.click()
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-white hover:text-gray-300 mr-1"
+                        title="Download snapshot"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setConfirmModal({
+                            isOpen: true,
+                            action: () => {
+                              const newSnapshots = savedSnapshots.filter(s => s.id !== snapshot.id)
+                              setSavedSnapshots(newSnapshots)
+                              localStorage.setItem('savedSnapshots', JSON.stringify(newSnapshots))
+                            },
+                            message: 'Delete this snapshot?'
+                          })
+                        }}
+                        className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400"
+                        title="Delete snapshot"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  )
+                } else {
+                  return (
+                    <div key={snapshot.id} className="relative group h-fit">
+                      <button
+                        onClick={() => setSelectedSnapshotForPreview(snapshot)}
+                        className="w-full text-left"
+                      >
+                        <div className="relative w-full aspect-video rounded overflow-hidden bg-gray-900">
+                          <img
+                            src={snapshot.url}
+                            alt={snapshot.prompt}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="mt-1 px-1">
+                          <p className="text-xs text-white truncate">{snapshot.prompt}</p>
+                          <p className="text-xs text-gray-400">{new Date(snapshot.timestamp).toLocaleDateString()}</p>
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          const link = document.createElement('a')
+                          link.href = snapshot.url
+                          link.download = `snapshot-${snapshot.timestamp}.jpg`
+                          link.click()
+                        }}
+                        className="absolute top-1 right-9 bg-black/70 hover:bg-black text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                        title="Download snapshot"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setConfirmModal({
+                            isOpen: true,
+                            action: () => {
+                              const newSnapshots = savedSnapshots.filter(s => s.id !== snapshot.id)
+                              setSavedSnapshots(newSnapshots)
+                              localStorage.setItem('savedSnapshots', JSON.stringify(newSnapshots))
+                            },
+                            message: 'Delete this snapshot?'
+                          })
+                        }}
+                        className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                        title="Delete snapshot"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  )
+                }
+              });
+            }
+          })()}
             </div>
           </div>
-        ) : (
-          <>
-            <h3 className="text-white text-lg font-semibold mb-2 md:mb-4 hidden md:block">Background</h3>
-            <div className="flex md:grid md:grid-cols-2 gap-2 h-full md:h-auto">
-              {/* Color Picker */}
-              <label className="relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 border-yellow-600 hover:border-yellow-400 cursor-pointer">
-                <input
-                  type="color"
-                  value={backgroundColor}
-                  onChange={(e) => {
-                    setBackgroundColor(e.target.value)
-                    setBackgroundImage(null)
-                  }}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-                <div className="w-24 md:w-full h-24 md:h-20 flex flex-col items-center justify-center" style={{ backgroundColor }}>
-                  <svg className="w-8 h-8 text-white mb-1 drop-shadow-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                  </svg>
-                  <span className="text-white text-xs md:text-sm font-semibold drop-shadow-lg">Color</span>
-                </div>
-              </label>
-              
-              {/* Upload Background */}
-              <label className="relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 border-[#212121]/50 bg-[#212121] hover:bg-[#212121]/80 text-white cursor-pointer">
-                <input
-                  type="file"
-                  accept="image/*,.exr,.hdr"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) {
-                      const reader = new FileReader()
-                      reader.onloadend = () => {
-                        const dataUrl = reader.result as string
-                        const uploadId = `uploaded_bg_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`
-
-                        // Add to uploaded backgrounds library
-                        const newUploadedBg = {
-                          id: uploadId,
-                          url: dataUrl,
-                          name: file.name
-                        }
-                        setUploadedBackgrounds(prev => [...prev, newUploadedBg])
-                        setBackgroundImage(dataUrl)
-                      }
-                      reader.readAsDataURL(file)
-                    }
-                  }}
-                  className="hidden"
-                />
-                <div className="w-24 md:w-full h-24 md:h-20 flex flex-col items-center justify-center">
-                  <svg className="w-8 h-8 text-white mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <span className="text-white text-xs md:text-sm font-semibold">Upload</span>
-                </div>
-              </label>
-              
-              {/* Generate Background */}
-              <button
-                onClick={() => setShowBackgroundModal(true)}
-                className="relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 border-[#212121]/50 bg-[#212121] hover:bg-[#212121]/80 text-white"
-              >
-                <div className="w-24 md:w-full h-24 md:h-20 flex flex-col items-center justify-center">
-                  <svg className="w-8 h-8 text-white mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
-                  <span className="text-white text-xs md:text-sm font-semibold">Generate</span>
-                </div>
-              </button>
-              
-              {/* Preset backgrounds */}
-              <button
-                onClick={() => {
-                  setBackgroundImage(null)
-                  setBackgroundColor('#1a1a1a')
-                  setSkyboxPreset(null)
-                }}
-                className={`relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 ${
-                  backgroundColor === '#1a1a1a' && !backgroundImage && !skyboxPreset
-                    ? 'border-gray-400 shadow-lg shadow-gray-400/30'
-                    : 'border-gray-600 hover:border-gray-400'
-                }`}
-              >
-                <div className="w-24 md:w-full h-24 md:h-20 bg-black border border-white flex items-center justify-center">
-                  <span className="text-white text-xs md:text-sm">Dark</span>
-                </div>
-              </button>
-
-              <button
-                onClick={() => {
-                  setBackgroundImage(null)
-                  setBackgroundColor('#ffffff')
-                  setSkyboxPreset(null)
-                }}
-                className={`relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 ${
-                  backgroundColor === '#ffffff' && !backgroundImage && !skyboxPreset
-                    ? 'border-gray-400 shadow-lg shadow-gray-400/30'
-                    : 'border-gray-600 hover:border-gray-400'
-                }`}
-              >
-                <div className="w-24 md:w-full h-24 md:h-20 bg-white flex items-center justify-center">
-                  <span className="text-black text-xs md:text-sm">Light</span>
-                </div>
-              </button>
-              
-              <button
-                onClick={() => {
-                  setBackgroundImage(null)
-                  setBackgroundColor('#87CEEB')
-                  setSkyboxPreset(null)
-                }}
-                className={`relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 ${
-                  backgroundColor === '#87CEEB' && !backgroundImage && !skyboxPreset
-                    ? 'border-gray-400 shadow-lg shadow-gray-400/30'
-                    : 'border-gray-600 hover:border-gray-400'
-                }`}
-              >
-                <div className="w-24 md:w-full h-24 md:h-20 bg-sky-300 flex items-center justify-center">
-                  <span className="text-white text-xs md:text-sm">Sky</span>
-                </div>
-              </button>
-
-              {/* Natural Sky Preset */}
-              <button
-                onClick={() => setBackgroundImage('/rustig_koppie_puresky_2k.exr')}
-                className={`flex-shrink-0 overflow-hidden rounded-lg border-2 transition-all ${
-                  backgroundImage === '/rustig_koppie_puresky_2k.exr'
-                    ? 'border-gray-400 shadow-lg shadow-gray-400/30'
-                    : 'border-gray-600 hover:border-gray-400'
-                }`}
-              >
-                <div className="w-24 md:w-full h-24 md:h-20 bg-gradient-to-b from-blue-400 to-orange-300 flex items-center justify-center">
-                  <span className="text-white text-xs md:text-sm font-semibold">Natural Sky</span>
-                </div>
-              </button>
-
-              {/* Uploaded Backgrounds */}
-              {uploadedBackgrounds.map((bg) => (
-                <div key={bg.id} className="relative group flex-shrink-0">
-                  <button
-                    onClick={() => setBackgroundImage(bg.url)}
-                    className={`relative overflow-hidden rounded-lg border-2 transition-all w-full h-full ${
-                      backgroundImage === bg.url
-                        ? 'border-gray-400 shadow-lg shadow-gray-400/30'
-                        : 'border-gray-600 hover:border-gray-400'
-                    }`}
-                    title={bg.name}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={bg.url}
-                      alt={bg.name}
-                      className="w-24 md:w-full h-24 md:h-20 object-cover"
-                    />
-                    <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white p-1">
-                      <span className="text-xs truncate block">{bg.name}</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setUploadedBackgrounds(prev => prev.filter(b => b.id !== bg.id))
-                      if (backgroundImage === bg.url) {
-                        setBackgroundImage(null)
-                      }
-                    }}
-                    className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                    title="Delete background"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-
-              {/* Generated Backgrounds */}
-              {generatedBackgrounds.map((bg) => (
-                <div key={bg.id} className="relative group flex-shrink-0">
-                  <button
-                    onClick={() => setBackgroundImage(bg.url)}
-                    className={`relative overflow-hidden rounded-lg border-2 transition-all w-full h-full ${
-                      backgroundImage === bg.url
-                        ? 'border-gray-400 shadow-lg shadow-gray-400/30'
-                        : 'border-gray-600 hover:border-gray-400'
-                    }`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={bg.url}
-                      alt="Generated background"
-                      className="w-24 md:w-full h-24 md:h-20 object-cover"
-                    />
-                    <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs p-1 text-center">
-                      <span>AI Generated</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setGeneratedBackgrounds(prev => prev.filter(b => b.id !== bg.id))
-                      if (backgroundImage === bg.url) {
-                        setBackgroundImage(null)
-                      }
-                    }}
-                    className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                    title="Delete background"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-            
-            {/* Full Color Spectrum Display */}
-            <div className="mt-4 p-3 bg-black border border-white rounded-lg">
-              <div className="relative h-8 rounded overflow-hidden">
-                <input
-                  type="color"
-                  value={backgroundColor}
-                  onChange={(e) => {
-                    setBackgroundColor(e.target.value)
-                    setBackgroundImage(null)
-                  }}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-                <div 
-                  className="w-full h-full cursor-pointer rounded"
-                  style={{ 
-                    background: `linear-gradient(to right, 
-                      #ff0000, #ff8800, #ffff00, #88ff00, 
-                      #00ff00, #00ff88, #00ffff, #0088ff,
-                      #0000ff, #8800ff, #ff00ff, #ff0088, #ff0000)`,
-                    position: 'relative'
-                  }}
-                >
-                  <div 
-                    className="absolute top-0 bottom-0 w-1 bg-white border border-black"
-                    style={{ 
-                      left: `${backgroundColor && backgroundColor.length > 1 ? ((parseInt(backgroundColor.slice(1), 16) / 0xffffff) * 100) : 0}%`
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          </>
-        )}
       </div>
-      
+
       {/* Generate Modal */}
       {showGenerateModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
@@ -1884,7 +2274,7 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                 onChange={(e) => setSelectedModel(e.target.value)}
                 disabled={isGenerating}
               >
-                <option value="nano-banana">nano banana (default)</option>
+                <option value="nano-banana">nano banana pro (default)</option>
                 <option value="flux-kontext">Flux Kontext MULTI-IMAGE MAX (via replicate api)</option>
                 <option value="openai-image">OPEN AI IMAGE</option>
               </select>
@@ -2067,7 +2457,6 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                         `AI_${Date.now()}`,
                         prompt
                       ).then(firebaseUrl => {
-                        console.log('AI texture saved to Firebase:', firebaseUrl)
                         // Optionally update to use Firebase URL for consistency
                         // But keep using the local data that's already working
                       }).catch(error => {
@@ -2132,29 +2521,165 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
           </div>
         </div>
       )}
-      
+
+      {/* Design Editor Modal - Full Screen */}
+      {showUVPanelEditor && (
+        <div className="fixed inset-0 bg-black z-50">
+          <UVPanelEditor
+            onComplete={handleUVPanelComplete}
+            userId={userId || undefined}
+            existingDesign={editingTexture}
+            flagColor={flagColor}
+            onFlagColorChange={setFlagColor}
+          />
+          <button
+            onClick={() => {
+              setShowUVPanelEditor(false)
+              setEditingTexture(null)
+            }}
+            className="absolute top-4 right-4 z-50 text-white hover:text-gray-300 transition-colors bg-gray-900 rounded-full p-2"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+
       {/* Background Generate Modal */}
       {showBackgroundModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-black rounded-lg p-6 max-w-md w-full my-8">
-            <h2 className="text-white text-xl font-bold mb-4">Generate Background</h2>
-            
-            <div className="mb-4">
-              <label className="text-white text-sm block mb-2">Describe your background:</label>
-              <textarea
-                value={backgroundPrompt}
-                onChange={(e) => setBackgroundPrompt(e.target.value)}
-                placeholder="E.g., Professional studio with soft gradient, Abstract geometric patterns, Natural sunset landscape..."
-                className="w-full bg-black border border-white/20 text-white rounded px-3 py-2 h-32 resize-none text-sm"
+          <div className="bg-black rounded-lg p-6 max-w-2xl w-full my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-white text-xl font-bold">Background Editor</h2>
+              <button
+                onClick={() => {
+                  setShowBackgroundModal(false)
+                  setBackgroundPrompt('')
+                }}
                 disabled={isGeneratingBackground}
-              />
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
-            
-            <div className="flex gap-2">
+
+            {/* Quick Actions */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              {/* Background Color Picker */}
+              <label className="relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 border-yellow-600 hover:border-yellow-400 cursor-pointer">
+                <input
+                  type="color"
+                  value={backgroundColor}
+                  onChange={(e) => {
+                    setBackgroundColor(e.target.value)
+                    setBackgroundImage(null)
+                    setSkyboxPreset(null)
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+                <div className="w-full h-20 flex flex-col items-center justify-center" style={{ backgroundColor }}>
+                  <svg className="w-6 h-6 text-white mb-1 drop-shadow-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                  </svg>
+                  <span className="text-white text-xs font-semibold drop-shadow-lg">Background</span>
+                </div>
+              </label>
+
+              {/* Upload Background */}
+              <label className="relative overflow-hidden rounded-lg border-2 transition-all flex-shrink-0 border-gray-600 bg-gray-700 hover:bg-gray-600 text-white cursor-pointer">
+                <input
+                  type="file"
+                  accept="image/*,.exr,.hdr"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      const reader = new FileReader()
+                      reader.onloadend = () => {
+                        const dataUrl = reader.result as string
+                        const uploadId = `uploaded_bg_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`
+
+                        // Add to uploaded backgrounds library
+                        const newUploadedBg = {
+                          id: uploadId,
+                          url: dataUrl,
+                          name: file.name
+                        }
+                        setUploadedBackgrounds(prev => [...prev, newUploadedBg])
+                        setBackgroundImage(dataUrl)
+                        setSkyboxPreset(null)
+                      }
+                      reader.readAsDataURL(file)
+                    }
+                  }}
+                  className="hidden"
+                />
+                <div className="w-full h-20 flex flex-col items-center justify-center">
+                  <svg className="w-6 h-6 text-white mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <span className="text-white text-xs font-semibold">Upload</span>
+                </div>
+              </label>
+
+              {/* Dark Preset */}
+              <button
+                onClick={() => {
+                  setBackgroundImage(null)
+                  setBackgroundColor('#1a1a1a')
+                  setSkyboxPreset(null)
+                }}
+                className={`relative overflow-hidden rounded-lg border-2 transition-all ${
+                  backgroundColor === '#1a1a1a' && !backgroundImage && !skyboxPreset
+                    ? 'border-gray-400 shadow-lg shadow-gray-400/30'
+                    : 'border-gray-600 hover:border-gray-400'
+                }`}
+              >
+                <div className="w-full h-20 bg-gray-800 flex flex-col items-center justify-center">
+                  <span className="text-white text-xs font-semibold">Dark</span>
+                </div>
+              </button>
+
+              {/* Sky Preset */}
+              <button
+                onClick={() => {
+                  setBackgroundImage(null)
+                  setBackgroundColor('#1a1a1a')
+                  setSkyboxPreset('park')
+                }}
+                className={`relative overflow-hidden rounded-lg border-2 transition-all ${
+                  skyboxPreset === 'park' && !backgroundImage
+                    ? 'border-gray-400 shadow-lg shadow-gray-400/30'
+                    : 'border-gray-600 hover:border-gray-400'
+                }`}
+              >
+                <div className="w-full h-20 bg-gradient-to-b from-blue-400 to-green-300 flex flex-col items-center justify-center">
+                  <span className="text-white text-xs font-semibold">Natural Sky</span>
+                </div>
+              </button>
+            </div>
+
+            {/* AI Generation Section */}
+            <div className="mb-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
+              <h3 className="text-white text-lg font-semibold mb-3">Generate AI Background</h3>
+              <div className="mb-4">
+                <label className="text-white text-sm block mb-2">Describe your background:</label>
+                <textarea
+                  value={backgroundPrompt}
+                  onChange={(e) => setBackgroundPrompt(e.target.value)}
+                  placeholder="E.g., Professional studio with soft gradient, Abstract geometric patterns, Natural sunset landscape..."
+                  className="w-full bg-black border border-white/20 text-white rounded px-3 py-2 h-24 resize-none text-sm"
+                  disabled={isGeneratingBackground}
+                />
+              </div>
+
               <button
                 onClick={async () => {
                   if (!backgroundPrompt.trim()) return
-                  
+
                   setIsGeneratingBackground(true)
                   try {
                     const response = await fetch('/api/generate-background', {
@@ -2164,20 +2689,19 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                         prompt: backgroundPrompt,
                       }),
                     })
-                    
+
                     if (!response.ok) throw new Error('Generation failed')
-                    
+
                     const data = await response.json()
-                    
+
                     // Add generated background to the gallery
                     const newBackground = {
                       id: data.filename,
                       url: data.imageData || `/${data.filename}`
                     }
-                    
                     setGeneratedBackgrounds(prev => [...prev, newBackground])
                     setBackgroundImage(newBackground.url)
-                    setShowBackgroundModal(false)
+                    setSkyboxPreset(null)
                     setBackgroundPrompt('')
                   } catch (error) {
                     console.error('Background generation error:', error)
@@ -2191,29 +2715,169 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                   }
                 }}
                 disabled={isGeneratingBackground || !backgroundPrompt.trim()}
-                className="flex-1 bg-[#ff00cb] hover:bg-[#ff00cb]/80 disabled:bg-gray-500 disabled:opacity-50 text-white rounded px-4 py-2 font-semibold transition-colors"
+                className="w-full bg-[#ff00cb] hover:bg-[#ff00cb]/80 disabled:bg-gray-500 disabled:opacity-50 text-white rounded px-4 py-2 font-semibold transition-colors"
               >
-                {isGeneratingBackground ? 'Generating...' : 'Generate'}
+                {isGeneratingBackground ? 'Generating...' : 'Generate Background'}
               </button>
-              
-              <button
-                onClick={() => {
-                  setShowBackgroundModal(false)
-                  setBackgroundPrompt('')
-                }}
-                disabled={isGeneratingBackground}
-                className="flex-1 bg-black hover:bg-white hover:text-black border border-white/20 disabled:bg-black text-white rounded px-4 py-2 font-semibold transition-colors"
-              >
-                Cancel
-              </button>
+
+              {isGeneratingBackground && (
+                <div className="mt-4 text-center">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                  <p className="text-white text-sm mt-2">Creating your background...</p>
+                </div>
+              )}
             </div>
-            
-            {isGeneratingBackground && (
-              <div className="mt-4 text-center">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
-                <p className="text-white text-sm mt-2">Creating your background...</p>
+
+            {/* Generated Backgrounds */}
+            {generatedBackgrounds.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-white text-lg font-semibold mb-3">Generated Backgrounds</h3>
+                <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                  {generatedBackgrounds.map((bg) => (
+                    <div key={bg.id} className="relative group">
+                      <button
+                        onClick={() => {
+                          setBackgroundImage(bg.url)
+                          setSkyboxPreset(null)
+                        }}
+                        className={`relative overflow-hidden rounded-lg border-2 transition-all w-full ${
+                          backgroundImage === bg.url
+                            ? 'border-blue-400 shadow-lg shadow-blue-400/30'
+                            : 'border-gray-600 hover:border-gray-400'
+                        }`}
+                      >
+                        <div className="aspect-video">
+                          <img
+                            src={bg.url}
+                            alt="Generated background"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setGeneratedBackgrounds(prev => prev.filter(b => b.id !== bg.id))
+                          if (backgroundImage === bg.url) {
+                            setBackgroundImage(null)
+                          }
+                        }}
+                        className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                        title="Delete background"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
+
+            {/* Uploaded Backgrounds */}
+            {uploadedBackgrounds.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-white text-lg font-semibold mb-3">Uploaded Backgrounds</h3>
+                <div className="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                  {uploadedBackgrounds.map((bg) => (
+                    <div key={bg.id} className="relative group">
+                      <button
+                        onClick={() => {
+                          setBackgroundImage(bg.url)
+                          setSkyboxPreset(null)
+                        }}
+                        className={`relative overflow-hidden rounded-lg border-2 transition-all w-full ${
+                          backgroundImage === bg.url
+                            ? 'border-blue-400 shadow-lg shadow-blue-400/30'
+                            : 'border-gray-600 hover:border-gray-400'
+                        }`}
+                        title={bg.name}
+                      >
+                        <div className="aspect-video">
+                          <img
+                            src={bg.url}
+                            alt={bg.name}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white p-1">
+                          <span className="text-xs truncate block">{bg.name}</span>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setUploadedBackgrounds(prev => prev.filter(b => b.id !== bg.id))
+                          if (backgroundImage === bg.url) {
+                            setBackgroundImage(null)
+                          }
+                        }}
+                        className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                        title="Delete background"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Floor Color Section */}
+            <div className="mt-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
+              <h3 className="text-white text-lg font-semibold mb-3">Floor Color</h3>
+
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                {/* Asphalt (Default) */}
+                <button
+                  onClick={() => setFloorMode('asphalt')}
+                  className={`relative overflow-hidden rounded-lg border-2 transition-all ${
+                    floorMode === 'asphalt'
+                      ? 'border-blue-400 shadow-lg shadow-blue-400/30'
+                      : 'border-gray-600 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="w-full h-20 bg-gradient-to-br from-gray-600 to-gray-800 flex flex-col items-center justify-center">
+                    <span className="text-white text-sm font-semibold">Asphalt</span>
+                    <span className="text-gray-300 text-xs">(Default)</span>
+                  </div>
+                </button>
+
+                {/* Custom Color */}
+                <button
+                  onClick={() => setFloorMode('custom')}
+                  className={`relative overflow-hidden rounded-lg border-2 transition-all ${
+                    floorMode === 'custom'
+                      ? 'border-blue-400 shadow-lg shadow-blue-400/30'
+                      : 'border-gray-600 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="w-full h-20 flex flex-col items-center justify-center" style={{ backgroundColor: floorColor }}>
+                    <svg className="w-6 h-6 text-white mb-1 drop-shadow-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                    </svg>
+                    <span className="text-white text-xs font-semibold drop-shadow-lg">Custom Color</span>
+                  </div>
+                </button>
+              </div>
+
+              {/* Color Picker - Only shown when Custom Color is selected */}
+              {floorMode === 'custom' && (
+                <div className="space-y-2">
+                  <label className="text-white text-sm block">Choose Floor Color:</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={floorColor}
+                      onChange={(e) => setFloorColor(e.target.value)}
+                      className="w-16 h-10 rounded cursor-pointer border-2 border-gray-600"
+                    />
+                    <span className="text-white text-sm font-mono">{floorColor}</span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -2309,12 +2973,116 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                   <option value="high">High (512px)</option>
                 </select>
               </div>
+
+              {/* AI Background Generation Section */}
+              <div className="border-t border-white/20 pt-4">
+                <h4 className="text-sm font-semibold text-white mb-2">Generate AI Background</h4>
+                <p className="text-xs text-gray-400 mb-3">Use your snapshot to create a custom AI background</p>
+
+                {/* Sidewalk Presets */}
+                <div className="mb-3">
+                  <label className="text-xs text-gray-400 block mb-2">Quick Sidewalk Presets</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {/* LA Sidewalk */}
+                    <button
+                      onClick={() => setSnapshotBackgroundPrompt('Add this robot onto a scene on a sidewalk in Los Angeles with palm trees, warm sunny lighting, urban California street scene, modern aesthetic')}
+                      className="px-2 py-2 rounded text-xs bg-gradient-to-r from-yellow-600 to-orange-500 hover:from-yellow-500 hover:to-orange-400 text-white font-semibold transition-colors"
+                      disabled={isGeneratingSnapshotBackground}
+                    >
+                      🌴 LA
+                    </button>
+
+                    {/* Chicago Sidewalk */}
+                    <button
+                      onClick={() => setSnapshotBackgroundPrompt('Add this robot onto a scene on a sidewalk in Chicago with urban architecture, downtown city street, modern skyscrapers, Midwest urban atmosphere')}
+                      className="px-2 py-2 rounded text-xs bg-gradient-to-r from-blue-600 to-gray-600 hover:from-blue-500 hover:to-gray-500 text-white font-semibold transition-colors"
+                      disabled={isGeneratingSnapshotBackground}
+                    >
+                      🏙️ Chicago
+                    </button>
+
+                    {/* Miami Beach Sidewalk */}
+                    <button
+                      onClick={() => setSnapshotBackgroundPrompt('Add this robot onto a scene on a sidewalk in Miami Beach with ocean view, art deco buildings, tropical vibes, sunny beach atmosphere, pastel colors')}
+                      className="px-2 py-2 rounded text-xs bg-gradient-to-r from-cyan-500 to-pink-500 hover:from-cyan-400 hover:to-pink-400 text-white font-semibold transition-colors"
+                      disabled={isGeneratingSnapshotBackground}
+                    >
+                      🏖️ Miami
+                    </button>
+                  </div>
+                </div>
+
+                {/* Prompt Input */}
+                <textarea
+                  value={snapshotBackgroundPrompt}
+                  onChange={(e) => setSnapshotBackgroundPrompt(e.target.value)}
+                  placeholder="Describe where to place the robot... (e.g., 'Add this robot onto a sidewalk in Tokyo at night with neon lights', 'Place this robot in a desert landscape with sand dunes')"
+                  className="w-full bg-black border border-white/20 text-white rounded px-3 py-2 h-20 resize-none text-sm mb-3"
+                  disabled={isGeneratingSnapshotBackground}
+                />
+
+                {/* Reference Image Upload */}
+                <div className="space-y-2">
+                  <label className="text-xs text-gray-400 block">Optional: Add reference image for style</label>
+                  <div className="flex gap-2">
+                    <label className="flex-1 relative overflow-hidden rounded border border-white/20 hover:border-white bg-gray-900 cursor-pointer transition-colors">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) {
+                            setReferenceImageFile(file)
+                            const reader = new FileReader()
+                            reader.onloadend = () => {
+                              setReferenceImagePreview(reader.result as string)
+                            }
+                            reader.readAsDataURL(file)
+                          }
+                        }}
+                        className="hidden"
+                        disabled={isGeneratingSnapshotBackground}
+                      />
+                      <div className="w-full h-12 flex items-center justify-center gap-2">
+                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <span className="text-white text-xs">
+                          {referenceImageFile ? 'Change Image' : 'Upload Reference'}
+                        </span>
+                      </div>
+                    </label>
+                    {referenceImageFile && (
+                      <button
+                        onClick={() => {
+                          setReferenceImageFile(null)
+                          setReferenceImagePreview(null)
+                        }}
+                        className="px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded border border-red-500/50 text-xs transition-colors"
+                        disabled={isGeneratingSnapshotBackground}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  {referenceImagePreview && (
+                    <div className="relative w-full h-24 rounded border border-white/20 overflow-hidden bg-gray-900">
+                      <img
+                        src={referenceImagePreview}
+                        alt="Reference preview"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setShowSnapshotModal(false)}
                 className="flex-1 px-4 py-2 bg-white hover:bg-black hover:text-white text-black border border-black rounded transition-colors"
+                disabled={isGeneratingSnapshotBackground}
               >
                 Cancel
               </button>
@@ -2323,9 +3091,228 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
                   setShowSnapshotModal(false)
                   downloadHighQualitySnapshot()
                 }}
-                className="flex-1 px-4 py-2 bg-black hover:bg-white hover:text-black text-white border border-white rounded transition-colors"
+                className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white border border-gray-600 rounded transition-colors"
+                disabled={isGeneratingSnapshotBackground}
               >
                 Download Snapshot
+              </button>
+              <button
+                onClick={async () => {
+                  if (!snapshotBackgroundPrompt.trim()) {
+                    setAlertModal({
+                      isOpen: true,
+                      message: 'Please enter a prompt for the AI background',
+                      type: 'error'
+                    })
+                    return
+                  }
+
+                  setIsGeneratingSnapshotBackground(true)
+                  try {
+                    // First, capture the current scene
+                    const snapshotData = await captureSceneSnapshot()
+                    if (!snapshotData) {
+                      throw new Error('Failed to capture scene snapshot')
+                    }
+
+                    // Convert reference image to base64 if provided
+                    let referenceImageData: string | null = null
+                    if (referenceImageFile) {
+                      referenceImageData = await new Promise<string>((resolve, reject) => {
+                        const reader = new FileReader()
+                        reader.onloadend = () => resolve(reader.result as string)
+                        reader.onerror = reject
+                        reader.readAsDataURL(referenceImageFile)
+                      })
+                    }
+
+                    // Call the new API endpoint with the snapshot, prompt, and optional reference image
+                    const response = await fetch('/api/generate-snapshot-background', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        snapshotImage: snapshotData,
+                        prompt: snapshotBackgroundPrompt,
+                        referenceImage: referenceImageData,
+                      }),
+                    })
+
+                    if (!response.ok) throw new Error('Background generation failed')
+
+                    const data = await response.json()
+
+                    // Store the generated background and show preview
+                    setGeneratedSnapshotBackground({
+                      url: data.imageData || `/${data.filename}`,
+                      prompt: snapshotBackgroundPrompt
+                    })
+                    setShowSnapshotModal(false)
+                    setShowBackgroundPreviewModal(true)
+
+                    // Clear reference image after successful generation
+                    setReferenceImageFile(null)
+                    setReferenceImagePreview(null)
+                  } catch (error) {
+                    console.error('Background generation error:', error)
+                    setAlertModal({
+                      isOpen: true,
+                      message: 'Failed to generate background. Please try again.',
+                      type: 'error'
+                    })
+                  } finally {
+                    setIsGeneratingSnapshotBackground(false)
+                  }
+                }}
+                disabled={isGeneratingSnapshotBackground || !snapshotBackgroundPrompt.trim()}
+                className="flex-1 px-4 py-2 bg-[#ff00cb] hover:bg-[#ff00cb]/80 disabled:bg-gray-500 disabled:opacity-50 text-white rounded transition-colors font-semibold"
+              >
+                {isGeneratingSnapshotBackground ? 'Generating...' : 'Generate AI Background'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Background Preview Modal with Save/Retry */}
+      {showBackgroundPreviewModal && generatedSnapshotBackground && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-black border border-white rounded-lg p-6 max-w-3xl w-full">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Generated Background Preview</h3>
+                <p className="text-sm text-gray-400 mt-1">Prompt: {generatedSnapshotBackground.prompt}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowBackgroundPreviewModal(false)
+                  setGeneratedSnapshotBackground(null)
+                  setSnapshotBackgroundPrompt('')
+                }}
+                className="text-white hover:text-gray-300 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Preview Image */}
+            <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-gray-900 mb-4">
+              <img
+                src={generatedSnapshotBackground.url}
+                alt="Generated background preview"
+                className="w-full h-full object-contain"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={async () => {
+                  // Retry - go back to snapshot modal with existing prompt
+                  setShowBackgroundPreviewModal(false)
+                  setShowSnapshotModal(true)
+                }}
+                className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white border border-gray-600 rounded transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Retry with New Prompt
+              </button>
+              <button
+                onClick={() => {
+                  // Save the snapshot to saved snapshots
+                  const newSnapshot = {
+                    id: `saved_snapshot_${Date.now()}`,
+                    url: generatedSnapshotBackground.url,
+                    prompt: generatedSnapshotBackground.prompt,
+                    timestamp: Date.now()
+                  }
+                  const updatedSnapshots = [...savedSnapshots, newSnapshot]
+                  setSavedSnapshots(updatedSnapshots)
+
+                  // Save to localStorage
+                  localStorage.setItem('savedSnapshots', JSON.stringify(updatedSnapshots))
+
+                  // Close modal and show success
+                  setShowBackgroundPreviewModal(false)
+                  setGeneratedSnapshotBackground(null)
+                  setSnapshotBackgroundPrompt('')
+
+                  // Switch to saved snapshots tab
+                  setActiveLibraryTab('saved-snapshots')
+
+                  setAlertModal({
+                    isOpen: true,
+                    message: 'Snapshot saved successfully! View it in the Snapshots tab.',
+                    type: 'success'
+                  })
+                }}
+                className="flex-1 px-4 py-2 bg-[#ff00cb] hover:bg-[#ff00cb]/80 text-white rounded transition-colors font-semibold flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Save Snapshot
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Saved Snapshot Preview Modal */}
+      {selectedSnapshotForPreview && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-black border border-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Snapshot Preview</h3>
+                <p className="text-sm text-gray-400 mt-1">{selectedSnapshotForPreview.prompt}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Saved on {new Date(selectedSnapshotForPreview.timestamp).toLocaleDateString()} at {new Date(selectedSnapshotForPreview.timestamp).toLocaleTimeString()}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedSnapshotForPreview(null)}
+                className="text-white hover:text-gray-300 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Preview Image */}
+            <div className="relative w-full rounded-lg overflow-hidden bg-gray-900 mb-4">
+              <img
+                src={selectedSnapshotForPreview.url}
+                alt={selectedSnapshotForPreview.prompt}
+                className="w-full h-auto object-contain max-h-[60vh]"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setSelectedSnapshotForPreview(null)}
+                className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white border border-gray-600 rounded transition-colors"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  const link = document.createElement('a')
+                  link.href = selectedSnapshotForPreview.url
+                  link.download = `snapshot-${selectedSnapshotForPreview.timestamp}.jpg`
+                  link.click()
+                }}
+                className="flex-1 px-4 py-2 bg-[#ff00cb] hover:bg-[#ff00cb]/80 text-white rounded transition-colors font-semibold flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download to Device
               </button>
             </div>
           </div>
@@ -2354,11 +3341,55 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
         type={alertModal.type}
       />
 
+      {/* Rename Modal */}
+      {renameModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-gray-900 rounded-lg p-6 max-w-md w-full mx-4 border border-gray-700">
+            <h3 className="text-xl font-semibold mb-4 text-white">Rename Design</h3>
+            <input
+              type="text"
+              value={newTextureName}
+              onChange={(e) => setNewTextureName(e.target.value)}
+              className="w-full bg-black border border-gray-600 text-white text-sm rounded px-3 py-2 mb-4"
+              placeholder="Enter new name..."
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newTextureName.trim() && renameModal.textureId && onRenameUserTexture) {
+                  onRenameUserTexture(renameModal.textureId, newTextureName.trim());
+                  setRenameModal({ isOpen: false });
+                }
+              }}
+            />
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setRenameModal({ isOpen: false })}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newTextureName.trim() && renameModal.textureId && onRenameUserTexture) {
+                    onRenameUserTexture(renameModal.textureId, newTextureName.trim());
+                    setRenameModal({ isOpen: false });
+                  }
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!newTextureName.trim()}
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {userId && userEmail && (
         <>
           <PublishModal
             isOpen={showPublishModal}
             onClose={() => setShowPublishModal(false)}
+            captureThumbnail={captureThumbnail}
             sceneData={{
               texture: (() => {
                 // If currentTexture is a user texture ID, find its URL
@@ -2381,12 +3412,49 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
               backgroundImage,
               numberOfUnits,
               sceneRotation,
-              scenePosition
+              scenePosition,
+
+              // Camera settings
+              cameraAngle: currentCameraAngle,
+              cameraPosition: {
+                x: cameraPresets[currentCameraAngle].position[0],
+                y: cameraPresets[currentCameraAngle].position[1],
+                z: cameraPresets[currentCameraAngle].position[2]
+              },
+              cameraTarget: {
+                x: cameraPresets[currentCameraAngle].target[0],
+                y: cameraPresets[currentCameraAngle].target[1],
+                z: cameraPresets[currentCameraAngle].target[2]
+              },
+
+              // Animation settings
+              isRotating,
+              rotationSpeed,
+
+              // Scene elements visibility
+              showPerson,
+              showGroundPlane: true, // Always show ground in published scenes
+
+              // Environment settings
+              environmentPreset: 'sunset',
+              environmentIntensity: 1.5,
+              backgroundIntensity: 1.5,
+
+              // Lighting settings (matching current scene defaults)
+              ambientLightIntensity: 0.4,
+              ambientLightColor: '#ffeedd',
+              directionalLightIntensity: 1.8,
+              directionalLightPosition: { x: 5, y: 15, z: 5 },
+              directionalLightColor: '#fffaf0',
+              hemisphereIntensity: 0.6,
+
+              // Shadow settings
+              shadowsEnabled: true,
+              shadowQuality: 4096
             }}
             userId={userId}
             userEmail={userEmail}
             onPublished={(sceneId) => {
-              console.log('Scene published with ID:', sceneId)
             }}
           />
 

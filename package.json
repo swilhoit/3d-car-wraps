@@ -13,11 +13,13 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@imgly/background-removal": "^1.7.0",
     "@react-three/drei": "^10.7.4",
     "@react-three/fiber": "^9.3.0",
     "@react-three/postprocessing": "^3.0.4",
     "@types/three": "^0.179.0",
     "canvas": "^3.2.0",
+    "fabric": "^7.1.0",
     "firebase": "^12.3.0",
     "firebase-admin": "^13.5.0",
     "firebase-tools": "^14.17.0",
@@ -35,6 +37,8 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@types/fabric": "^5.3.11",
+    "@types/formidable": "^3.4.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

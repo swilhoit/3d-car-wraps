@@ -1,8 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import path from 'path';
 import sharp from 'sharp';
+import { NextApiRequest, NextApiResponse } from 'next';
 
-export default async function handler(req, res) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -19,11 +20,11 @@ export default async function handler(req, res) {
 
   try {
     // Initialize the Gemini API
-    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
+    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || '');
     
-    // Use Gemini 2.5 Flash Image Preview (Nano Banana) for image generation
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash-image-preview",
+    // Use Gemini 3 Pro Image (Nano Banana Pro) for image generation
+    const model = genAI.getGenerativeModel({
+      model: "gemini-3-pro-image-preview",
       generationConfig: {
         temperature: 0.9,
         topK: 40,
@@ -43,7 +44,7 @@ export default async function handler(req, res) {
     const parts = [{ text: fullPrompt }];
 
     // Generate content
-    console.log('Calling Gemini 2.5 Flash Image Preview API for background...');
+    console.log('Calling Gemini 3 Pro Image API for background...');
     const result = await model.generateContent(parts);
     const response = result.response;
     
@@ -66,9 +67,9 @@ export default async function handler(req, res) {
             // Save the generated image
             const imageBuffer = Buffer.from(part.inlineData.data, 'base64');
             
-            // Resize/optimize for background use
+            // Resize/optimize for background use - Nano Banana Pro supports up to 4K
             await sharp(imageBuffer)
-              .resize(1920, 1080, {
+              .resize(3840, 2160, {
                 fit: 'cover',
                 position: 'center'
               })
@@ -143,7 +144,13 @@ export default async function handler(req, res) {
     });
 
     // In production, return base64 data instead of file paths
-    let responseData = {
+    const responseData: {
+      filename: string;
+      success: boolean;
+      message: string;
+      imageGenerated: boolean;
+      imageData?: string;
+    } = {
       filename,
       success: true,
       message: imageGenerated ? 'Background generated successfully!' : 'Created gradient background',
@@ -162,11 +169,11 @@ export default async function handler(req, res) {
     
     return res.status(200).json(responseData);
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Background generation error:', error);
     
     // Check if it's a model access error and fallback to gradient
-    if (error.message && error.message.includes('not found')) {
+    if (error instanceof Error && error.message && error.message.includes('not found')) {
       try {
         const timestamp = Date.now();
         const filename = `bg_generated_${timestamp}.jpg`;
@@ -202,11 +209,11 @@ export default async function handler(req, res) {
       }
     }
     
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: 'Failed to generate background',
-      details: error.message,
-      hint: error.message.includes('not found') 
-        ? 'The gemini-2.5-flash-image-preview model requires special access. Using gradient fallback.'
+      details: error instanceof Error ? error.message : 'Unknown error',
+      hint: error instanceof Error && error.message.includes('not found')
+        ? 'The gemini-3-pro-image-preview model requires special access. Using gradient fallback.'
         : undefined
     });
   }
