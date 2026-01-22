@@ -619,13 +619,13 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
   }, [backgroundImage])
 
   const cameraPresets: Record<string, { position: number[], target: number[], name: string }> = {
-    front: { position: [0, 0.5, 5], target: [0, -0.5, 0], name: 'Front' },
-    side: { position: [5, 0.5, 0], target: [0, -0.5, 0], name: 'Side' },
-    back: { position: [0, 0.5, -5], target: [0, -0.5, 0], name: 'Back' },
-    topFront: { position: [0, 3, 4], target: [0, -0.5, 0], name: 'Top Front' },
-    lowAngle: { position: [0, -0.5, 4], target: [0, -0.3, 0], name: 'Low Angle' },
-    threequarter: { position: [3.5, 1, 3.5], target: [0, -0.5, 0], name: '3/4 View' },
-    custom: { position: [5, 6, 5], target: [0, -0.5, 0], name: 'Top 3/4' }
+    front: { position: [0, 2, 14], target: [0, 0, 0], name: 'Front' },
+    side: { position: [14, 2, 0], target: [0, 0, 0], name: 'Side' },
+    back: { position: [0, 2, -14], target: [0, 0, 0], name: 'Back' },
+    topFront: { position: [0, 10, 12], target: [0, 0, 0], name: 'Top Front' },
+    lowAngle: { position: [0, 0.5, 12], target: [0, 0, 0], name: 'Low Angle' },
+    threequarter: { position: [10, 4, 10], target: [0, 0, 0], name: '3/4 View' },
+    custom: { position: [12, 12, 12], target: [0, 0, 0], name: 'Top 3/4' }
   }
 
   // Validate current texture exists, reset to default if missing (but only for older textures)
@@ -857,7 +857,7 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
       }}>
         <Canvas
           ref={canvasRef}
-          camera={{ position: [0, 0, 5 + (Math.sqrt(numberOfUnits) - 1) * 3], fov: 45 }}
+          camera={{ position: [0, 2, 14 + (Math.sqrt(numberOfUnits) - 1) * 5], fov: 45 }}
           dpr={[1, 2]}
           gl={{
             antialias: true,

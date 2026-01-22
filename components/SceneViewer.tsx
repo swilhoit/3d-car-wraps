@@ -296,10 +296,10 @@ export default function SceneViewer({ scene }: SceneViewerProps) {
   const [currentCameraAngle, setCurrentCameraAngle] = useState(0);
 
   const cameraPresets = [
-    { position: [0, 2, 8], target: [0, 0, 0], name: 'Front' },
-    { position: [8, 2, 0], target: [0, 0, 0], name: 'Side' },
-    { position: [0, 8, 2], target: [0, 0, 0], name: 'Top' },
-    { position: [5, 5, 5], target: [0, 0, 0], name: 'Angle' }
+    { position: [0, 2, 14], target: [0, 0, 0], name: 'Front' },
+    { position: [14, 2, 0], target: [0, 0, 0], name: 'Side' },
+    { position: [0, 12, 4], target: [0, 0, 0], name: 'Top' },
+    { position: [10, 6, 10], target: [0, 0, 0], name: 'Angle' }
   ];
 
   const currentPreset = cameraPresets[currentCameraAngle];
