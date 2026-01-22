@@ -76,14 +76,14 @@ export interface DesignEditorState {
   version: string;
 }
 
-// Base panel definitions
+// Base panel definitions for Waymo model
 export const BASE_PANELS: Panel[] = [
-  { id: 1, name: 'RIGHT', templatePath: '/UVTemplateFiles/PANELS/1 RIGHT.png', width: 2190, height: 1278, logoOverlay: { enabled: true, variant: 'white' } },
-  { id: 2, name: 'LEFT', templatePath: '/UVTemplateFiles/PANELS/2 LEFT.png', width: 2192, height: 1247, logoOverlay: { enabled: true, variant: 'white' } },
-  { id: 3, name: 'BACK', templatePath: '/UVTemplateFiles/PANELS/3 BACK.png', width: 2192, height: 1248, logoOverlay: { enabled: true, variant: 'white' } },
-  { id: 4, name: 'TOP FRONT', templatePath: '/UVTemplateFiles/PANELS/4 TOP FRONT.png', width: 2192, height: 1248 },
-  { id: 5, name: 'FRONT', templatePath: '/UVTemplateFiles/PANELS/5 FRONT.png', width: 2192, height: 1013 },
-  { id: 6, name: 'LID', templatePath: '/UVTemplateFiles/PANELS/6 LID.png', width: 2192, height: 2175, logoOverlay: { enabled: true, variant: 'white' } },
+  { id: 1, name: 'Panel 1', templatePath: '/waymo-panels/01.png', width: 4097, height: 4097 },
+  { id: 2, name: 'Panel 2', templatePath: '/waymo-panels/02.png', width: 4097, height: 4097 },
+  { id: 3, name: 'Panel 3', templatePath: '/waymo-panels/03.png', width: 4097, height: 4096 },
+  { id: 4, name: 'Panel 4', templatePath: '/waymo-panels/04.png', width: 4097, height: 4096 },
+  { id: 5, name: 'Panel 5', templatePath: '/waymo-panels/05.png', width: 4097, height: 4097 },
+  { id: 6, name: 'Panel 6', templatePath: '/waymo-panels/06.png', width: 4097, height: 4097 },
 ];
 
 interface EditorState {
