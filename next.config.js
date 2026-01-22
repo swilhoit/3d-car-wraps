@@ -8,13 +8,16 @@ const nextConfig = {
   },
   compress: true,
   poweredByHeader: false,
-  
+
+  // Enable Turbopack (Next.js 16 default)
+  turbopack: {},
+
   webpack: (config) => {
     config.module.rules.push({
       test: /\.(glb|gltf)$/,
       type: 'asset/resource',
     });
-    
+
     return config;
   },
 }

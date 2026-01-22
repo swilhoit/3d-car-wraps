@@ -10,19 +10,7 @@ import { useTexturePreloader } from '@/hooks/useTexturePreloader'
 import CachedImage from '@/components/CachedImage'
 
 const defaultTextures = [
-  { id: 'Coco Wrap.png', name: 'Coco Wrap', thumbnail: '/Coco Wrap Thumbnail.png' },
-  { id: 'blank-template.png', name: 'Blank', thumbnail: null },
-  { id: 'chargers.jpg', name: 'Chargers', thumbnail: '/thumbnails/chargers.png' },
-  { id: 'littlecaesars.jpg', name: 'Little Caesars', thumbnail: '/thumbnails/little caesars.png' },
-  { id: 'picnic.jpg', name: 'Picnic', thumbnail: '/thumbnails/picnic.png' },
-  { id: 'robosense.jpg', name: 'RoboSense', thumbnail: '/thumbnails/robosense.png' },
-  { id: 'creator.jpg', name: 'The Creator', thumbnail: '/thumbnails/the creator.png' },
-  { id: 'venom.jpg', name: 'Venom', thumbnail: '/thumbnails/venom.png' },
-  { id: 'wolt.jpg', name: 'Wolt', thumbnail: '/thumbnails/wolt.png' },
-  { id: 'xpel.jpg', name: 'Xpel', thumbnail: '/thumbnails/xpel.png' },
-  { id: 'pickup.jpg', name: 'Pickup', thumbnail: '/thumbnails/prime.png' },
-  { id: 'donjulio.jpg', name: 'Don Julio', thumbnail: '/thumbnails/don julio.png' },
-  { id: 'electricstate.jpg', name: 'Electric State', thumbnail: '/thumbnails/netflix.png' }
+  { id: 'blank-waymo.png', name: 'Blank White', thumbnail: null }
 ]
 
 // Image preloader with progressive loading and caching
@@ -64,9 +52,9 @@ function useProgressiveTexture(texturePath: string | null, generatedTextures: Ar
     }
 
     if (!texturePath) {
-      // Load Coco Wrap texture as fallback instead of null
+      // Load blank white texture as fallback
       setIsLoading(true)
-      loadTextureWithCache('/Coco Wrap.png').then(loadedTexture => {
+      loadTextureWithCache('/blank-waymo.png').then(loadedTexture => {
         setTexture(loadedTexture)
         setIsLoading(false)
       })
@@ -141,11 +129,11 @@ function useProgressiveTexture(texturePath: string | null, generatedTextures: Ar
             console.error('Error loading texture:', texturePath, error)
             setIsLoading(false)
             
-            // For AI-generated textures that fail to load, try fallback to UV template
+            // For AI-generated textures that fail to load, try fallback to Waymo UV template
             if (texturePath && texturePath.startsWith('ai_generated_')) {
               console.log('Falling back to UV template for missing AI texture:', texturePath)
               loader.load(
-                '/uv-template.jpg',
+                '/waymo-uv-template.png',
                 (fallbackTexture) => {
                   fallbackTexture.flipY = false
                   fallbackTexture.wrapS = THREE.RepeatWrapping
@@ -264,11 +252,11 @@ function GroundPlane() {
   )
 }
 
-function CocoModel({ currentTexture, isRotating, generatedTextures, numberOfUnits, scenePosition, sceneRotation, rotationSpeed }: { currentTexture: string | null, isRotating: boolean, generatedTextures: Array<{ id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string }>, numberOfUnits: number, scenePosition: { x: number, y: number, z: number }, sceneRotation: { x: number, y: number, z: number }, rotationSpeed: number }) {
+function WaymoModel({ currentTexture, isRotating, generatedTextures, numberOfUnits, scenePosition, sceneRotation, rotationSpeed }: { currentTexture: string | null, isRotating: boolean, generatedTextures: Array<{ id: string, name: string, thumbnail: string, isGenerated: true, imageData?: string }>, numberOfUnits: number, scenePosition: { x: number, y: number, z: number }, sceneRotation: { x: number, y: number, z: number }, rotationSpeed: number }) {
   const groupRef = useRef<Group>(null!)
   const individualGroupRefs = useRef<(Group | null)[]>([])
   const [isDragging, setIsDragging] = useState(false)
-  const { scene } = useGLTF('/CocoAdWrap.glb')
+  const { scene } = useGLTF('/Waymo.glb')
   const { texture, isLoading } = useProgressiveTexture(currentTexture, generatedTextures)
   const rotationDirections = useRef<number[]>([])
   
@@ -305,9 +293,9 @@ function CocoModel({ currentTexture, isRotating, generatedTextures, numberOfUnit
           }
           
           const material = child.material as THREE.Material
-          
-          // Only update materials that are named exactly "Coco Wrap"
-          if (material && material.name === 'Coco Wrap') {
+
+          // Only update materials that are named exactly "Full Wrap"
+          if (material && material.name === 'Full Wrap') {
             // Always apply a material, never leave it undefined
             // Reuse material if possible, just update the map and properties
             if (child.material instanceof THREE.MeshStandardMaterial) {
@@ -475,7 +463,7 @@ function PersonModel() {
 }
 
 // Preload models
-useGLTF.preload('/CocoAdWrap.glb')
+useGLTF.preload('/Waymo.glb')
 useFBX.preload('/3D-guy.fbx')
 
 // Utility function to check if a texture file exists
@@ -506,15 +494,15 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
   // Initialize texture preloader
   useTexturePreloader()
 
-  // Initialize with Coco Wrap texture as default
-  const [internalTexture, setInternalTexture] = useState<string>('Coco Wrap.png')
+  // Initialize with blank white texture as default
+  const [internalTexture, setInternalTexture] = useState<string>('blank-waymo.png')
   // Use internal texture if external is null or undefined
   const currentTexture = externalTexture !== null && externalTexture !== undefined ? externalTexture : internalTexture
 
-  // Ensure Coco Wrap texture stays as default
+  // Ensure blank texture stays as default
   useEffect(() => {
     if (!externalTexture) {
-      setInternalTexture('Coco Wrap.png')
+      setInternalTexture('blank-waymo.png')
     }
   }, [externalTexture])
 
@@ -660,7 +648,7 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
         const exists = await checkTextureExists(currentTexture)
         if (!exists) {
           console.warn('Current texture is missing, resetting to default:', currentTexture)
-          setInternalTexture('uv-template.jpg')
+          setInternalTexture('blank-waymo.png')
         }
       }
     }
@@ -935,7 +923,7 @@ export default function ChromeModel({ currentTexture: externalTexture, onSaveAIT
           />
 
           <Suspense fallback={null}>
-            <CocoModel currentTexture={currentTexture} isRotating={isRotating} generatedTextures={generatedTextures} numberOfUnits={numberOfUnits} scenePosition={scenePosition} sceneRotation={sceneRotation} rotationSpeed={rotationSpeed} />
+            <WaymoModel currentTexture={currentTexture} isRotating={isRotating} generatedTextures={generatedTextures} numberOfUnits={numberOfUnits} scenePosition={scenePosition} sceneRotation={sceneRotation} rotationSpeed={rotationSpeed} />
 
 
             {/* Person model for size comparison */}

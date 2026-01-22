@@ -17,22 +17,10 @@ class TextureCacheManager {
   }
 
   private initializePresets(): void {
-    // Preset textures to preload - only existing files
+    // Preset textures to preload - Waymo assets only
     const presets = [
-      '/Coco Wrap Thumbnail.png',
-      '/Coco Wrap.png',
-      '/blank-template.png',
-      '/chargers.jpg',
-      '/littlecaesars.jpg',
-      '/picnic.jpg',
-      '/robosense.jpg',
-      '/creator.jpg',
-      '/venom.jpg',
-      '/wolt.jpg',
-      '/xpel.jpg',
-      '/pickup.jpg',
-      '/donjulio.jpg',
-      '/electricstate.jpg'
+      '/blank-waymo.png',
+      '/waymo-uv-template.png'
     ];
 
     presets.forEach(url => {

@@ -23,7 +23,7 @@
     "firebase-tools": "^14.17.0",
     "formidable": "^3.5.4",
     "google-auth-library": "^10.3.0",
-    "next": "15.5.0",
+    "next": "^16.1.4",
     "node-fetch": "^3.3.2",
     "postprocessing": "^6.37.7",
     "react": "19.1.0",

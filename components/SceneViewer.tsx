@@ -6,7 +6,7 @@ import { Suspense, useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
 
 // Preload models for faster loading
-useGLTF.preload('/CocoAdWrap.glb');
+useGLTF.preload('/Waymo.glb');
 useGLTF.preload('/Chicago Bean.glb');
 useFBX.preload('/3D-guy.fbx');
 
@@ -139,16 +139,16 @@ function ViewerModel({
   isRotating: boolean;
   rotationSpeed?: number;
 }) {
-  const { scene } = useGLTF('/CocoAdWrap.glb');
+  const { scene } = useGLTF('/Waymo.glb');
   const groupRef = useRef<THREE.Group>(null);
   const [loadedTexture, setLoadedTexture] = useState<THREE.Texture | null>(null);
 
   // Load texture
   useEffect(() => {
     if (!texture) {
-      // Load default Coco Wrap texture
+      // Load default blank white texture
       const loader = new THREE.TextureLoader();
-      loader.load('/Coco Wrap.png', (tex) => {
+      loader.load('/blank-waymo.png', (tex) => {
         tex.flipY = false;
         tex.wrapS = THREE.RepeatWrapping;
         tex.wrapT = THREE.RepeatWrapping;
@@ -189,7 +189,7 @@ function ViewerModel({
         console.error('Error loading texture:', error);
         // Load fallback
         const fallbackLoader = new THREE.TextureLoader();
-        fallbackLoader.load('/Coco Wrap.png', (fallbackTex) => {
+        fallbackLoader.load('/blank-waymo.png', (fallbackTex) => {
           fallbackTex.flipY = false;
           fallbackTex.wrapS = THREE.RepeatWrapping;
           fallbackTex.wrapT = THREE.RepeatWrapping;
@@ -235,7 +235,7 @@ function ViewerModel({
         clonedScene.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             const material = child.material as THREE.Material;
-            if (material && material.name === 'Coco Wrap' && loadedTexture) {
+            if (material && material.name === 'Full Wrap' && loadedTexture) {
               child.material = new THREE.MeshStandardMaterial({
                 map: loadedTexture,
                 metalness: 0.0,

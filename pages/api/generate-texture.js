@@ -89,9 +89,9 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
     // Build the parts array for multi-modal input
     const parts = [];
     
-    // ALWAYS use UV template as base for proper mapping
-    const uvTemplatePath = path.join(process.cwd(), 'public', 'uv-template.jpg');
-    const uvTemplatePart = await fileToGenerativePart(uvTemplatePath);
+    // ALWAYS use Waymo UV template as base for proper mapping
+    const uvTemplatePath = path.join(process.cwd(), 'public', 'waymo-uv-template.png');
+    const uvTemplatePart = await fileToGenerativePart(uvTemplatePath, 'image/png');
     if (uvTemplatePart) {
       parts.push(uvTemplatePart);
     }
@@ -112,10 +112,10 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
       }
     }
     
-    // Build comprehensive prompt for image generation
-    let fullPrompt = `IMPORTANT: The first image is a UV template with multiple frames/panels. You MUST fill in EACH frame/panel of this UV template with the design. Each white rectangular area in the template represents a different face/side of the 3D model that needs to be filled with the texture design. ${prompt}. `;
-    
-    fullPrompt += 'This UV template shows the unwrapped surfaces of a 3D model. Fill each white rectangular frame with the texture design, maintaining proper alignment and continuity across panels. ';
+    // Build comprehensive prompt for Waymo vehicle wrap image generation
+    let fullPrompt = `IMPORTANT: The first image is a UV template for a Waymo Jaguar I-Pace vehicle wrap with 6 panels stacked vertically. You MUST fill in EACH of the 6 panel areas with the design. The panels represent: (1) Hood, (2) Front bumper, (3) Left side, (4) Right side, (5) Rear/trunk, (6) Roof. ${prompt}. `;
+
+    fullPrompt += 'This UV template shows the unwrapped surfaces of a Waymo self-driving vehicle. Fill each of the 6 vertical panel sections with the texture design, maintaining proper alignment and continuity across panels for a cohesive vehicle wrap. ';
     
     if (logo) {
       fullPrompt += 'LOGO PLACEMENT: The provided logo must be placed INDIVIDUALLY on EACH and EVERY frame/panel of the UV template. Do not place the logo on just one panel - replicate it across ALL white rectangular areas. Each panel should have its own instance of the logo integrated into the design. The logo should appear on every face/side of the 3D model when wrapped. ';
@@ -125,13 +125,13 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
       fullPrompt += 'Use the reference image for style, color palette, and aesthetic inspiration throughout all panels. ';
     }
     
-    fullPrompt += 'Create a cohesive design that fills ALL white frames/panels in the UV template. ';
-    
+    fullPrompt += 'Create a cohesive vehicle wrap design that fills ALL 6 panels in the UV template vertically. ';
+
     if (logo) {
-      fullPrompt += 'Remember: The logo MUST appear on EACH individual frame/panel, not just once. Every white rectangular area should contain the logo as part of its design. ';
+      fullPrompt += 'Remember: The logo MUST appear on EACH of the 6 panels (Hood, Front bumper, Left side, Right side, Rear, Roof), not just once. Every panel should contain the logo as part of its design. ';
     }
-    
-    fullPrompt += 'The design should be continuous and properly mapped for 3D application. Each panel should contain part of the overall design that will wrap correctly when applied to the 3D model. The output must maintain the exact UV template layout with all frames filled.';
+
+    fullPrompt += 'The design should be continuous and properly mapped for 3D vehicle wrap application. Each of the 6 panels should contain part of the overall design that will wrap correctly when applied to the Waymo vehicle. The output must maintain the exact UV template layout with all 6 panels filled vertically.';
     
     // Add the text prompt
     parts.push({ text: fullPrompt });
@@ -185,8 +185,8 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
         generatedText = 'Image generation in progress';
       }
       
-      // Use UV template as fallback base
-      const sourcePath = path.join(process.cwd(), 'public', 'uv-template.jpg');
+      // Use Waymo UV template as fallback base
+      const sourcePath = path.join(process.cwd(), 'public', 'waymo-uv-template.png');
       try {
         await fs.copyFile(sourcePath, filePath);
       } catch (copyError) {
@@ -366,8 +366,8 @@ async function generateWithNanoBanana(req, res, prompt, baseTexture, logo, refer
         const thumbnailFilename = `ai_thumb_${timestamp}.jpg`;
         const thumbnailPath = path.join('/tmp', thumbnailFilename);
         
-        // Always use UV template for consistency
-        const sourcePath = path.join(process.cwd(), 'public', 'uv-template.jpg');
+        // Always use Waymo UV template for consistency
+        const sourcePath = path.join(process.cwd(), 'public', 'waymo-uv-template.png');
         
         await fs.copyFile(sourcePath, filePath);
         
